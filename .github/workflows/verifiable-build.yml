@@ -27,6 +27,7 @@ jobs:
           node-version: '24'
       - name: Test built binary
         run: |
+          sudo chown -R "$(id -u):$(id -g)" target
           npm ci
           npm test
       - name: Upload binary
