@@ -1,0 +1,75 @@
+use anchor_lang::prelude::*;
+
+#[event]
+pub struct Initialized {
+    pub admin: Pubkey,
+    pub usdc_mint: Pubkey,
+    pub gate_slots: u64,
+    pub lock_amount: u64,
+}
+#[event]
+pub struct OnceSet {
+    pub once_mint: Pubkey,
+    pub once_token_program: Pubkey,
+}
+#[event]
+pub struct ParamsSet {
+    pub gate_slots: u64,
+    pub lock_amount: u64,
+}
+#[event]
+pub struct Written {
+    pub call: Pubkey,
+    pub id: u64,
+    pub writer: Pubkey,
+    pub mint: Pubkey,
+    pub lot: u64,
+    pub strike: u64,
+    pub premium: u64,
+    pub expiry_ts: i64,
+    pub written_slot: u64,
+    pub gate_until: u64,
+}
+#[event]
+pub struct Bought {
+    pub call: Pubkey,
+    pub id: u64,
+    pub holder: Pubkey,
+    pub premium: u64,
+    pub slot: u64,
+    pub locked: u64,
+}
+#[event]
+pub struct Exercised {
+    pub call: Pubkey,
+    pub id: u64,
+    pub holder: Pubkey,
+    pub writer: Pubkey,
+    pub strike: u64,
+    pub delivered: u64,
+    pub slot: u64,
+}
+#[event]
+pub struct Cancelled {
+    pub call: Pubkey,
+    pub id: u64,
+    pub writer: Pubkey,
+    pub returned: u64,
+    pub slot: u64,
+}
+#[event]
+pub struct Reclaimed {
+    pub call: Pubkey,
+    pub id: u64,
+    pub writer: Pubkey,
+    pub holder: Option<Pubkey>,
+    pub returned: u64,
+    pub slot: u64,
+}
+#[event]
+pub struct LockReturned {
+    pub call: Pubkey,
+    pub locker: Pubkey,
+    pub returned: u64,
+    pub slot: u64,
+}

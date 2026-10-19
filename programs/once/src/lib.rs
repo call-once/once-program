@@ -1,0 +1,440 @@
+use anchor_lang::prelude::*;
+use anchor_spl::token_interface::{self, CloseAccount, TransferChecked};
+
+pub mod contexts;
+pub mod error;
+pub mod events;
+pub mod mint;
+pub mod state;
+
+use contexts::*;
+use error::OnceError;
+use events::*;
+use state::*;
+
+declare_id!("24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93");
+
+#[cfg(not(feature = "no-entrypoint"))]
+solana_security_txt::security_txt! {
+    name: "once",
+    project_url: "https://callonce.xyz",
+    contacts: "link:https://x.com/calloncedotxyz",
+    policy: "https://github.com/call-once/once-program/blob/main/SECURITY.md",
+    preferred_languages: "en",
+    source_code: "https://github.com/call-once/once-program"
+}
+
+
+#[program]
+pub mod once {
+    use super::*;
+
+    pub fn init(
+        ctx: Context<Init>,
+        admin: Pubkey,
+        gate_slots: u64,
+        lock_amount: u64,
+    ) -> Result<()> {
+        require!(gate_slots > 0 && lock_amount > 0, OnceError::InvalidValue);
+        ctx.accounts.config.set_inner(Config {
+            admin,
+            usdc_mint: ctx.accounts.usdc_mint.key(),
+            once_mint: None,
+            once_token_program: None,
+            gate_slots,
+            lock_amount,
+            next_id: 0,
+            bump: ctx.bumps.config,
+        });
+        emit_cpi!(Initialized {
+            admin,
+            usdc_mint: ctx.accounts.usdc_mint.key(),
+            gate_slots,
+            lock_amount
+        });
+        Ok(())
+    }
+
+    pub fn set_once(ctx: Context<SetOnce>) -> Result<()> {
+        let mint = ctx.accounts.once_mint.key();
+        let owner = *ctx.accounts.once_mint.to_account_info().owner;
+        ctx.accounts.config.once_mint = Some(mint);
+        ctx.accounts.config.once_token_program = Some(owner);
+        emit_cpi!(OnceSet {
+            once_mint: mint,
+            once_token_program: owner
+        });
+        Ok(())
+    }
+
+    pub fn set_params(ctx: Context<SetParams>, gate_slots: u64, lock_amount: u64) -> Result<()> {
+        require!(gate_slots > 0 && lock_amount > 0, OnceError::InvalidValue);
+        ctx.accounts.config.gate_slots = gate_slots;
+        ctx.accounts.config.lock_amount = lock_amount;
+        emit_cpi!(ParamsSet {
+            gate_slots,
+            lock_amount
+        });
+        Ok(())
+    }
+
+    pub fn write(
+        ctx: Context<Write>,
+        id: u64,
+        lot: u64,
+        strike: u64,
+        premium: u64,
+        expiry_ts: i64,
+    ) -> Result<()> {
+        require!(
+            lot > 0 && strike > 0 && premium > 0,
+            OnceError::InvalidValue
+        );
+        let clock = Clock::get()?;
+        require!(expiry_ts > clock.unix_timestamp, OnceError::ExpiryNotFuture);
+        mint::validate_mint(&ctx.accounts.mint.to_account_info())?;
+        let config = &mut ctx.accounts.guard.config;
+        let gate_until = if config.once_mint.is_some() {
+            clock
+                .slot
+                .checked_add(config.gate_slots)
+                .ok_or(OnceError::Overflow)?
+        } else {
+            clock.slot
+        };
+        let next_id = config.next_id.checked_add(1).ok_or(OnceError::Overflow)?;
+        transfer(
+            ctx.accounts.token_program.key(),
+            ctx.accounts.source.to_account_info(),
+            ctx.accounts.mint.to_account_info(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            lot,
+            ctx.accounts.mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.vault.reload()?;
+        require_eq!(ctx.accounts.vault.amount, lot, OnceError::DepositMismatch);
+        ctx.accounts.call.set_inner(Call {
+            id,
+            writer: ctx.accounts.writer.key(),
+            mint: ctx.accounts.mint.key(),
+            token_program: ctx.accounts.token_program.key(),
+            lot,
+            strike,
+            premium,
+            expiry_ts,
+            written_slot: clock.slot,
+            gate_until,
+            state: CallState::Open,
+            holder: None,
+            bought_slot: 0,
+            settled_slot: 0,
+            bump: ctx.bumps.call,
+        });
+        config.next_id = next_id;
+        emit_cpi!(Written {
+            call: ctx.accounts.call.key(),
+            id,
+            writer: ctx.accounts.writer.key(),
+            mint: ctx.accounts.mint.key(),
+            lot,
+            strike,
+            premium,
+            expiry_ts,
+            written_slot: clock.slot,
+            gate_until
+        });
+        Ok(())
+    }
+
+    pub fn buy(ctx: Context<Buy>) -> Result<()> {
+        let clock = Clock::get()?;
+        let call = &mut ctx.accounts.call;
+        require!(clock.unix_timestamp < call.expiry_ts, OnceError::Expired);
+        require!(clock.slot >= call.gate_until, OnceError::InGate);
+        require!(ctx.accounts.vault.amount >= call.lot, OnceError::VaultShort);
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.payment_source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            call.premium,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        call.holder = Some(ctx.accounts.buyer.key());
+        call.bought_slot = clock.slot;
+        call.state = CallState::Held;
+        emit_cpi!(Bought {
+            call: call.key(),
+            id: call.id,
+            holder: ctx.accounts.buyer.key(),
+            premium: call.premium,
+            slot: clock.slot,
+            locked: 0
+        });
+        Ok(())
+    }
+
+    pub fn lock_and_buy(ctx: Context<LockAndBuy>) -> Result<()> {
+        let clock = Clock::get()?;
+        let call = &mut ctx.accounts.guard.call;
+        let amount = ctx.accounts.guard.config.lock_amount;
+        require!(ctx.accounts.vault.amount >= call.lot, OnceError::VaultShort);
+        transfer(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.once_source.to_account_info(),
+            ctx.accounts.once_mint.to_account_info(),
+            ctx.accounts.lock_vault.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            amount,
+            ctx.accounts.once_mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.lock_vault.reload()?;
+        require_eq!(
+            ctx.accounts.lock_vault.amount,
+            amount,
+            OnceError::DepositMismatch
+        );
+        ctx.accounts.lock.set_inner(Lock {
+            locker: ctx.accounts.buyer.key(),
+            call: call.key(),
+            amount,
+            release_slot: call.gate_until,
+            bump: ctx.bumps.lock,
+        });
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.payment_source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            call.premium,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        call.holder = Some(ctx.accounts.buyer.key());
+        call.bought_slot = clock.slot;
+        call.state = CallState::Held;
+        emit_cpi!(Bought {
+            call: call.key(),
+            id: call.id,
+            holder: ctx.accounts.buyer.key(),
+            premium: call.premium,
+            slot: clock.slot,
+            locked: amount
+        });
+        Ok(())
+    }
+
+    pub fn call(ctx: Context<Exercise>) -> Result<()> {
+        let clock = Clock::get()?;
+        let call = &mut ctx.accounts.call;
+        require!(clock.unix_timestamp < call.expiry_ts, OnceError::Expired);
+        require!(ctx.accounts.vault.amount >= call.lot, OnceError::VaultShort);
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.payment_source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            ctx.accounts.holder.to_account_info(),
+            call.strike,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        let id = call.id.to_le_bytes();
+        let seeds: &[&[u8]] = &[b"call", &id, &[call.bump]];
+        let delivered = ctx.accounts.vault.amount;
+        transfer(
+            ctx.accounts.token_program.key(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.mint.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+            call.to_account_info(),
+            delivered,
+            ctx.accounts.mint.decimals,
+            &[seeds],
+        )?;
+        close(
+            ctx.accounts.token_program.key(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            call.to_account_info(),
+            &[seeds],
+        )?;
+        call.state = CallState::Exercised;
+        call.settled_slot = clock.slot;
+        emit_cpi!(Exercised {
+            call: call.key(),
+            id: call.id,
+            holder: ctx.accounts.holder.key(),
+            writer: call.writer,
+            strike: call.strike,
+            delivered,
+            slot: clock.slot
+        });
+        Ok(())
+    }
+
+    pub fn cancel(ctx: Context<Cancel>) -> Result<()> {
+        let call = &mut ctx.accounts.call;
+        let returned = ctx.accounts.vault.amount;
+        settle(
+            call,
+            ctx.accounts.token_program.key(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.mint.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            returned,
+            ctx.accounts.mint.decimals,
+        )?;
+        call.state = CallState::Cancelled;
+        call.settled_slot = Clock::get()?.slot;
+        emit_cpi!(Cancelled {
+            call: call.key(),
+            id: call.id,
+            writer: call.writer,
+            returned,
+            slot: call.settled_slot
+        });
+        Ok(())
+    }
+
+    pub fn reclaim(ctx: Context<Reclaim>) -> Result<()> {
+        let clock = Clock::get()?;
+        let call = &mut ctx.accounts.call;
+        require!(
+            clock.unix_timestamp >= call.expiry_ts,
+            OnceError::NotExpired
+        );
+        let returned = ctx.accounts.vault.amount;
+        settle(
+            call,
+            ctx.accounts.token_program.key(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.mint.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            returned,
+            ctx.accounts.mint.decimals,
+        )?;
+        call.state = CallState::Reclaimed;
+        call.settled_slot = clock.slot;
+        emit_cpi!(Reclaimed {
+            call: call.key(),
+            id: call.id,
+            writer: call.writer,
+            holder: call.holder,
+            returned,
+            slot: clock.slot
+        });
+        Ok(())
+    }
+
+    pub fn return_lock(ctx: Context<ReturnLock>) -> Result<()> {
+        let clock = Clock::get()?;
+        let lock = &ctx.accounts.lock;
+        require!(clock.slot >= lock.release_slot, OnceError::LockNotReleased);
+        let returned = ctx.accounts.lock_vault.amount;
+        let seeds: &[&[u8]] = &[b"lock", lock.call.as_ref(), &[lock.bump]];
+        transfer(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.lock_vault.to_account_info(),
+            ctx.accounts.once_mint.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+            lock.to_account_info(),
+            returned,
+            ctx.accounts.once_mint.decimals,
+            &[seeds],
+        )?;
+        close(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.lock_vault.to_account_info(),
+            ctx.accounts.locker.to_account_info(),
+            lock.to_account_info(),
+            &[seeds],
+        )?;
+        emit_cpi!(LockReturned {
+            call: lock.call,
+            locker: lock.locker,
+            returned,
+            slot: clock.slot
+        });
+        Ok(())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transfer<'info>(
+    program: Pubkey,
+    from: AccountInfo<'info>,
+    mint: AccountInfo<'info>,
+    to: AccountInfo<'info>,
+    authority: AccountInfo<'info>,
+    amount: u64,
+    decimals: u8,
+    seeds: &[&[&[u8]]],
+) -> Result<()> {
+    token_interface::transfer_checked(
+        CpiContext::new_with_signer(
+            program,
+            TransferChecked {
+                from,
+                mint,
+                to,
+                authority,
+            },
+            seeds,
+        ),
+        amount,
+        decimals,
+    )
+}
+
+fn close<'info>(
+    program: Pubkey,
+    account: AccountInfo<'info>,
+    destination: AccountInfo<'info>,
+    authority: AccountInfo<'info>,
+    seeds: &[&[&[u8]]],
+) -> Result<()> {
+    token_interface::close_account(CpiContext::new_with_signer(
+        program,
+        CloseAccount {
+            account,
+            destination,
+            authority,
+        },
+        seeds,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn settle<'info>(
+    call: &Account<'info, Call>,
+    program: Pubkey,
+    vault: AccountInfo<'info>,
+    mint: AccountInfo<'info>,
+    destination: AccountInfo<'info>,
+    writer: AccountInfo<'info>,
+    amount: u64,
+    decimals: u8,
+) -> Result<()> {
+    let id = call.id.to_le_bytes();
+    let seeds: &[&[u8]] = &[b"call", &id, &[call.bump]];
+    transfer(
+        program,
+        vault.clone(),
+        mint,
+        destination,
+        call.to_account_info(),
+        amount,
+        decimals,
+        &[seeds],
+    )?;
+    close(program, vault, writer, call.to_account_info(), &[seeds])
+}
