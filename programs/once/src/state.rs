@@ -11,6 +11,15 @@ pub struct Config {
     pub lock_amount: u64,
     pub next_id: u64,
     pub bump: u8,
+    pub gate_floor: u64,
+}
+
+pub fn gate_end(call: &Call, config: &Config) -> u64 {
+    if call.gate_until == call.written_slot {
+        config.gate_floor
+    } else {
+        call.gate_until
+    }
 }
 
 #[account]

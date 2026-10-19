@@ -20,7 +20,7 @@ pub struct GateGuard<'info> {
         constraint = call.state == CallState::Open @ OnceError::NotOpen,
         constraint = Clock::get()?.unix_timestamp < call.expiry_ts @ OnceError::Expired,
         constraint = config.once_mint.is_some() @ OnceError::OnceNotSet,
-        constraint = Clock::get()?.slot < call.gate_until @ OnceError::GateClosed)]
+        constraint = Clock::get()?.slot < gate_end(&call, &config) @ OnceError::GateClosed)]
     pub call: Box<Account<'info, Call>>,
 }
 
@@ -42,12 +42,15 @@ pub struct Init<'info> {
 #[event_cpi]
 #[derive(Accounts)]
 pub struct SetOnce<'info> {
+    #[account(mut)]
     pub admin: Signer<'info>,
     #[account(mut, seeds = [b"config"], bump = config.bump,
+        realloc = 8 + Config::INIT_SPACE, realloc::payer = admin, realloc::zero = false,
         has_one = admin @ OnceError::NotAdmin,
         constraint = config.once_mint.is_none() @ OnceError::OnceAlreadySet)]
     pub config: Box<Account<'info, Config>>,
     pub once_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub system_program: Program<'info, System>,
 }
 
 #[event_cpi]

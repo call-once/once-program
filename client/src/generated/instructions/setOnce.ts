@@ -27,9 +27,9 @@ import {
   type InstructionWithAccounts,
   type InstructionWithData,
   type ReadonlyAccount,
-  type ReadonlySignerAccount,
   type ReadonlyUint8Array,
   type WritableAccount,
+  type WritableSignerAccount,
 } from "@solana/kit";
 import {
   getAccountMetaFactory,
@@ -55,6 +55,8 @@ export type SetOnceInstruction<
   TAccountAdmin extends string | AccountMeta<string> = string,
   TAccountConfig extends string | AccountMeta<string> = string,
   TAccountOnceMint extends string | AccountMeta<string> = string,
+  TAccountSystemProgram extends string | AccountMeta<string> =
+    "11111111111111111111111111111111",
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountProgram extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -63,7 +65,7 @@ export type SetOnceInstruction<
   InstructionWithAccounts<
     [
       TAccountAdmin extends string
-        ? ReadonlySignerAccount<TAccountAdmin> &
+        ? WritableSignerAccount<TAccountAdmin> &
             AccountSignerMeta<TAccountAdmin>
         : TAccountAdmin,
       TAccountConfig extends string
@@ -72,6 +74,9 @@ export type SetOnceInstruction<
       TAccountOnceMint extends string
         ? ReadonlyAccount<TAccountOnceMint>
         : TAccountOnceMint,
+      TAccountSystemProgram extends string
+        ? ReadonlyAccount<TAccountSystemProgram>
+        : TAccountSystemProgram,
       TAccountEventAuthority extends string
         ? ReadonlyAccount<TAccountEventAuthority>
         : TAccountEventAuthority,
@@ -113,6 +118,8 @@ export type SetOnceAsyncInput<
   TAccountAdmin extends InstructionSignerInput = InstructionSignerInput,
   TAccountConfig extends InstructionAccountInput = InstructionAccountInput,
   TAccountOnceMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountSystemProgram extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -120,6 +127,7 @@ export type SetOnceAsyncInput<
   admin: TAccountAdmin;
   config?: TAccountConfig;
   onceMint: TAccountOnceMint;
+  systemProgram?: TAccountSystemProgram;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -128,6 +136,7 @@ export async function getSetOnceInstructionAsync<
   TAccountAdmin extends InstructionSignerInput,
   TAccountConfig extends InstructionAccountInput,
   TAccountOnceMint extends InstructionAccountInput,
+  TAccountSystemProgram extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof ONCE_PROGRAM_ADDRESS,
@@ -136,6 +145,7 @@ export async function getSetOnceInstructionAsync<
     TAccountAdmin,
     TAccountConfig,
     TAccountOnceMint,
+    TAccountSystemProgram,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -156,6 +166,10 @@ export async function getSetOnceInstructionAsync<
       InstructionAccountInputAddress<TAccountOnceMint>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountSystemProgram,
+      InstructionAccountInputAddress<TAccountSystemProgram>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -173,10 +187,15 @@ export async function getSetOnceInstructionAsync<
 
   // Original accounts.
   const originalAccounts = {
-    admin: { value: input.admin ?? null, isSigner: true, isWritable: false },
+    admin: { value: input.admin ?? null, isSigner: true, isWritable: true },
     config: { value: input.config ?? null, isSigner: false, isWritable: true },
     onceMint: {
       value: input.onceMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    systemProgram: {
+      value: input.systemProgram ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -200,12 +219,17 @@ export async function getSetOnceInstructionAsync<
   if (!accounts.config.value) {
     accounts.config.value = await findConfigPda({ programAddress });
   }
+  if (!accounts.systemProgram.value) {
+    accounts.systemProgram.value =
+      "11111111111111111111111111111111" as Address<"11111111111111111111111111111111">;
+  }
 
   return Object.freeze({
     accounts: [
       getAccountMeta("admin", accounts.admin),
       getAccountMeta("config", accounts.config),
       getAccountMeta("onceMint", accounts.onceMint),
+      getAccountMeta("systemProgram", accounts.systemProgram),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -226,6 +250,10 @@ export async function getSetOnceInstructionAsync<
       InstructionAccountInputAddress<TAccountOnceMint>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountSystemProgram,
+      InstructionAccountInputAddress<TAccountSystemProgram>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
       InstructionAccountInputAddress<TAccountEventAuthority>
     >,
@@ -240,6 +268,8 @@ export type SetOnceInput<
   TAccountAdmin extends InstructionSignerInput = InstructionSignerInput,
   TAccountConfig extends InstructionAccountInput = InstructionAccountInput,
   TAccountOnceMint extends InstructionAccountInput = InstructionAccountInput,
+  TAccountSystemProgram extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput = InstructionAccountInput,
@@ -247,6 +277,7 @@ export type SetOnceInput<
   admin: TAccountAdmin;
   config: TAccountConfig;
   onceMint: TAccountOnceMint;
+  systemProgram?: TAccountSystemProgram;
   eventAuthority: TAccountEventAuthority;
   program: TAccountProgram;
 };
@@ -255,6 +286,7 @@ export function getSetOnceInstruction<
   TAccountAdmin extends InstructionSignerInput,
   TAccountConfig extends InstructionAccountInput,
   TAccountOnceMint extends InstructionAccountInput,
+  TAccountSystemProgram extends InstructionAccountInput,
   TAccountEventAuthority extends InstructionAccountInput,
   TAccountProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof ONCE_PROGRAM_ADDRESS,
@@ -263,6 +295,7 @@ export function getSetOnceInstruction<
     TAccountAdmin,
     TAccountConfig,
     TAccountOnceMint,
+    TAccountSystemProgram,
     TAccountEventAuthority,
     TAccountProgram
   >,
@@ -282,6 +315,10 @@ export function getSetOnceInstruction<
     InstructionAccountInputAddress<TAccountOnceMint>
   >,
   ResolvedInstructionAccountMeta<
+    TAccountSystemProgram,
+    InstructionAccountInputAddress<TAccountSystemProgram>
+  >,
+  ResolvedInstructionAccountMeta<
     TAccountEventAuthority,
     InstructionAccountInputAddress<TAccountEventAuthority>
   >,
@@ -298,10 +335,15 @@ export function getSetOnceInstruction<
 
   // Original accounts.
   const originalAccounts = {
-    admin: { value: input.admin ?? null, isSigner: true, isWritable: false },
+    admin: { value: input.admin ?? null, isSigner: true, isWritable: true },
     config: { value: input.config ?? null, isSigner: false, isWritable: true },
     onceMint: {
       value: input.onceMint ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    systemProgram: {
+      value: input.systemProgram ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -321,11 +363,18 @@ export function getSetOnceInstruction<
     ResolvedInstructionAccount
   >;
 
+  // Resolve default values.
+  if (!accounts.systemProgram.value) {
+    accounts.systemProgram.value =
+      "11111111111111111111111111111111" as Address<"11111111111111111111111111111111">;
+  }
+
   return Object.freeze({
     accounts: [
       getAccountMeta("admin", accounts.admin),
       getAccountMeta("config", accounts.config),
       getAccountMeta("onceMint", accounts.onceMint),
+      getAccountMeta("systemProgram", accounts.systemProgram),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("program", accounts.program),
     ],
@@ -344,6 +393,10 @@ export function getSetOnceInstruction<
     ResolvedInstructionAccountMeta<
       TAccountOnceMint,
       InstructionAccountInputAddress<TAccountOnceMint>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSystemProgram,
+      InstructionAccountInputAddress<TAccountSystemProgram>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEventAuthority,
@@ -365,8 +418,9 @@ export type ParsedSetOnceInstruction<
     admin: TAccountMetas[0];
     config: TAccountMetas[1];
     onceMint: TAccountMetas[2];
-    eventAuthority: TAccountMetas[3];
-    program: TAccountMetas[4];
+    systemProgram: TAccountMetas[3];
+    eventAuthority: TAccountMetas[4];
+    program: TAccountMetas[5];
   };
   data: SetOnceInstructionData;
 };
@@ -379,12 +433,12 @@ export function parseSetOnceInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedSetOnceInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 5) {
+  if (instruction.accounts.length < 6) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 5,
+        expectedAccountMetas: 6,
       },
     );
   }
@@ -400,6 +454,7 @@ export function parseSetOnceInstruction<
       admin: getNextAccount(),
       config: getNextAccount(),
       onceMint: getNextAccount(),
+      systemProgram: getNextAccount(),
       eventAuthority: getNextAccount(),
       program: getNextAccount(),
     },

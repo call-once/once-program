@@ -4,3 +4,4 @@ export * from './events.js';
 export * from './mint.js';
 export * from './exercise.js';
 export * from './constants.js';
+export * from './config.js';

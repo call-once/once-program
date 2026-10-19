@@ -11,6 +11,15 @@ import { stockMintInstructions, onceMintInstructions } from '../scripts/test-min
 import { CallState } from '../client/src/generated/index.js';
 
 const timeout = 60_000;
+async function publicPhase(h: Harness, c: Awaited<ReturnType<Harness['write']>>) {
+  if (!unwrapOption(h.configState().onceMint)) await h.send('set_once', h.setOnceIx(), h.admin);
+  const state = h.callState(c);
+  h.slot(state.gateUntil === state.writtenSlot ? h.configState().gateFloor : state.gateUntil);
+}
+async function publicBuy(h: Harness, c: Awaited<ReturnType<Harness['write']>>) {
+  await publicPhase(h, c);
+  await h.send('buy', h.buyIx(c), h.buyer);
+}
 afterAll(() => {
   const report = { computeUnits: measurements, accounts: accountMeasurements, eventSamples, dedicatedMeasurements };
   writeFileSync(new URL('../target/measurements.json', import.meta.url), json(report) + '\n');
@@ -117,19 +126,10 @@ for (const onceProgram of [TOKEN, TOKEN_2022]) describe(`P3 P5 P9 ONCE ${oncePro
   }, timeout);
 });
 
-test('P3 calls written before set_once have no interval, including their write slot', async () => {
-  const h = await Harness.create();
-  const c = await h.write();
-  expect(h.callState(c).gateUntil).toBe(h.callState(c).writtenSlot);
-  await h.send('lock_without_once', h.lockBuyIx(c), h.buyer, 'OnceNotSet');
-  await h.send('set_once', h.setOnceIx(), h.admin);
-  await h.send('buy', h.buyIx(c), h.buyer);
-}, timeout);
-
 test('P4 expiry boundary, writer and holder authorization, final states', async () => {
   const h = await Harness.create();
   const c = await h.write();
-  await h.send('buy', h.buyIx(c), h.buyer);
+  await publicBuy(h, c);
   await h.send('cancel_held', h.cancelIx(c), h.writer, 'NotOpen');
   await h.send('wrong_writer_cancel', h.cancelIx(c, { writer: h.stranger }), h.stranger, 'NotWriter');
   await h.send('early_reclaim', h.reclaimIx(c), h.writer, 'NotExpired');
@@ -139,7 +139,7 @@ test('P4 expiry boundary, writer and holder authorization, final states', async 
   for (const ix of [await h.callIx(c), h.cancelIx(c), h.reclaimIx(c)]) await h.send('settled_again', ix, h.buyer, '');
   h.time(1000n);
   const expired = await h.write();
-  await h.send('buy', h.buyIx(expired), h.buyer);
+  await publicBuy(h, expired);
   h.time(expired.expiry);
   await h.send('call_at_expiry', await h.callIx(expired), h.buyer, 'Expired');
   await h.send('reclaim', h.reclaimIx(expired), h.writer);
@@ -152,7 +152,6 @@ test('P4 expiry boundary, writer and holder authorization, final states', async 
   await h.send('buy_at_expiry', h.buyIx(open), h.buyer, 'Expired');
   await h.send('reclaim', h.reclaimIx(open), h.writer);
   h.time(1000n);
-  await h.send('set_once', h.setOnceIx(), h.admin);
   const gated = await h.write();
   h.time(gated.expiry);
   await h.send('lock_buy_at_expiry', h.lockBuyIx(gated), h.buyer, 'Expired');
@@ -179,19 +178,18 @@ test('P6 exact rent refunds, fee losses, and event fields', async () => {
   expect(h.events.at(-1)).toMatchObject({ name: 'Written', data: { call: c.call, id: c.id, writer: h.writer.address, mint: c.mint,
     lot: LOT, strike: STRIKE, premium: PREMIUM, expiryTs: c.expiry, writtenSlot: 1000n, gateUntil: 1000n } });
   const buyerBefore = amount(h.svm, h.buyerUsdc), writerBefore = amount(h.svm, h.writerUsdc);
-  await h.send('buy', h.buyIx(c), h.buyer);
-  expect(h.events.at(-1)).toMatchObject({ name: 'Bought', data: { call: c.call, id: c.id, holder: h.buyer.address, premium: PREMIUM, slot: 1000n, locked: 0n } });
+  await publicBuy(h, c);
+  expect(h.events.at(-1)).toMatchObject({ name: 'Bought', data: { call: c.call, id: c.id, holder: h.buyer.address, premium: PREMIUM, slot: h.configState().gateFloor, locked: 0n } });
   expect(amount(h.svm, h.buyerUsdc)).toBe(buyerBefore - PREMIUM);
   expect(amount(h.svm, h.writerUsdc)).toBe(writerBefore + PREMIUM);
   await h.send('call_new_ata', await h.callIx(c), h.buyer);
   expect(h.events.at(-1)).toMatchObject({ name: 'Exercised', data: { call: c.call, id: c.id, holder: h.buyer.address, writer: h.writer.address,
-    strike: STRIKE, delivered: LOT, slot: 1000n } });
+    strike: STRIKE, delivered: LOT, slot: h.configState().gateFloor } });
   expect(start - h.svm.getBalance(h.writer.address)!).toBe(writeFee + callRent.lamports);
   expect(amount(h.svm, h.buyerUsdc)).toBe(buyerBefore - PREMIUM - STRIKE);
   expect(amount(h.svm, h.writerUsdc)).toBe(writerBefore + PREMIUM + STRIKE);
   expect(h.svm.getAccount(c.call).exists).toBe(true);
   expect(h.svm.getAccount(c.vault).exists).toBe(false);
-  await h.send('set_once', h.setOnceIx(), h.admin);
   const locked = await h.write();
   const buyerStart = h.svm.getBalance(h.buyer.address)!;
   await h.send('lock_and_buy', h.lockBuyIx(locked), h.buyer);
@@ -209,7 +207,7 @@ test('P7 all 12 mainnet mint layouts: exercise, cancellation, expiry reclaim', a
     const exercise = await h.write(mint);
     const target = await ata(h.buyer.address, mint, TOKEN_2022);
     const before = amount(h.svm, target);
-    await h.send('buy', h.buyIx(exercise), h.buyer);
+    await publicBuy(h, exercise);
     await h.send('call_new_ata', await h.callIx(exercise), h.buyer);
     expect(amount(h.svm, target) - before, symbol).toBe(LOT);
     const cancelled = await h.write(mint);
@@ -217,7 +215,7 @@ test('P7 all 12 mainnet mint layouts: exercise, cancellation, expiry reclaim', a
     await h.send('cancel', h.cancelIx(cancelled), h.writer);
     expect(amount(h.svm, cancelled.source) - writerBefore).toBe(LOT);
     const expired = await h.write(mint);
-    await h.send('buy', h.buyIx(expired), h.buyer);
+    await publicBuy(h, expired);
     h.time(expired.expiry);
     const reclaimBefore = amount(h.svm, expired.source);
     await h.send('reclaim', h.reclaimIx(expired), h.writer);
@@ -238,7 +236,7 @@ test('P7 mint rejection matches client inspection; classic mint is accepted', as
   }
   const mint = await h.createMint(TOKEN);
   const c = await h.write(mint);
-  await h.send('buy', h.buyIx(c), h.buyer);
+  await publicBuy(h, c);
   await h.send('call_classic', await h.callIx(c), h.buyer);
 }, timeout);
 
@@ -265,7 +263,7 @@ test('P8b/c all donated tokens follow the owner and never prevent close', async 
     const c = await h.write();
     const donor = await h.fundToken(h.stranger, c.mint, c.tokenProgram, 7n);
     await h.donate(donor, c.vault, c.mint, c.tokenProgram, h.stranger, 7n);
-    if (mode !== 'cancel') await h.send('buy', h.buyIx(c), h.buyer);
+    if (mode !== 'cancel') await publicBuy(h, c);
     if (mode === 'reclaim') h.time(c.expiry);
     const recipient = mode === 'call' ? await ata(h.buyer.address, c.mint, c.tokenProgram) : c.source;
     const before = amount(h.svm, recipient);
@@ -274,7 +272,6 @@ test('P8b/c all donated tokens follow the owner and never prevent close', async 
     expect(h.svm.getAccount(c.vault).exists).toBe(false);
   }
   h.time(1000n);
-  await h.send('set_once', h.setOnceIx(), h.admin);
   const c = await h.write();
   await h.send('lock_and_buy', h.lockBuyIx(c), h.buyer);
   const onceDonor = await h.fundToken(h.stranger, h.onceMint, h.onceProgram, 9n);
@@ -288,7 +285,7 @@ test('P8b/c all donated tokens follow the owner and never prevent close', async 
 for (const attack of ['close', 'reassign'] as const) test(`P8d/e atomic exercise when writer payment ATA is ${attack}`, async () => {
   const h = await Harness.create();
   const c = await h.write();
-  await h.send('buy', h.buyIx(c), h.buyer);
+  await publicBuy(h, c);
   if (attack === 'close') {
     const writerFunds = amount(h.svm, h.writerUsdc);
     await h.donate(h.writerUsdc, h.buyerUsdc, h.usdc, TOKEN, h.writer, writerFunds);
@@ -342,18 +339,18 @@ test('P8g permanent delegate depletion blocks payment; writer receives the remai
   const thief = await h.fundToken(h.admin, XSTOCKS.NVDAx, TOKEN_2022, 1n);
   const open = await h.write();
   await h.donate(open.vault, thief, open.mint, open.tokenProgram, h.admin, 11n);
+  await publicPhase(h, open);
   await h.send('buy_short', h.buyIx(open), h.buyer, 'VaultShort');
   await h.send('cancel_short', h.cancelIx(open), h.writer);
   expect(h.events.at(-1)).toMatchObject({ name: 'Cancelled', data: { returned: LOT - 11n } });
   const held = await h.write();
-  await h.send('buy', h.buyIx(held), h.buyer);
+  await publicBuy(h, held);
   await h.donate(held.vault, thief, held.mint, held.tokenProgram, h.admin, 13n);
   await h.send('call_short', await h.callIx(held), h.buyer, 'VaultShort');
   h.time(held.expiry);
   await h.send('reclaim_short', h.reclaimIx(held), h.writer);
   expect(h.events.at(-1)).toMatchObject({ name: 'Reclaimed', data: { returned: LOT - 13n } });
   h.time(1000n);
-  await h.send('set_once', h.setOnceIx(), h.admin);
   const gated = await h.write();
   await h.donate(gated.vault, thief, gated.mint, gated.tokenProgram, h.admin);
   await h.send('lock_buy_short', h.lockBuyIx(gated), h.buyer, 'VaultShort');
@@ -372,7 +369,7 @@ for (const onceProgram of [TOKEN, TOKEN_2022]) test(`P10 measurement ${onceProgr
   await h.send('return_lock', h.returnIx(c), h.buyer);
   const existing = await h.write();
   h.slot(h.callState(existing).gateUntil);
-  await h.send('buy', h.buyIx(existing), h.buyer);
+  await publicBuy(h, existing);
   await h.send('call_existing_ata', await h.callIx(existing), h.buyer);
   const cancelled = await h.write();
   await h.send('cancel', h.cancelIx(cancelled), h.writer);
@@ -396,7 +393,7 @@ test('Devnet mint builders execute with the eight stock extensions and metadata 
   const scaled = extensions.find(x => x.__kind === 'ScaledUiAmountConfig');
   expect(scaled && scaled.__kind === 'ScaledUiAmountConfig' && scaled.multiplier).toBe(1.0039);
   const c = await h.write(mint.mint);
-  await h.send('buy', h.buyIx(c), h.buyer);
+  await publicBuy(h, c);
   await h.send('call_test_stock', await h.callIx(c), h.buyer);
   const once = await onceMintInstructions(h.admin, async bytes => h.svm.minimumBalanceForRentExemption(BigInt(bytes)));
   await h.send('create_once_test_mint', once.instructions, h.admin);

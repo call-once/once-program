@@ -44,7 +44,7 @@ export class Harness {
   events: ReturnType<typeof decodeEvents> = [];
   receipts: { label: string; cu: string; events: unknown[] }[] = [];
 
-  static async create(options: { gated?: boolean; onceProgram?: Address; initialize?: boolean; delegate?: boolean } = {}) {
+  static async create(options: { gated?: boolean; onceProgram?: Address; initialize?: boolean; delegate?: boolean; binary?: URL } = {}) {
     const h = new Harness();
     const manifest = JSON.parse(readFileSync(new URL('./fixtures/programs.json', import.meta.url), 'utf8'));
     for (const row of manifest) {
@@ -52,7 +52,7 @@ export class Harness {
       expect(createHash('sha256').update(bytes).digest('hex')).toBe(row.sha256);
       h.svm.addProgram(address(row.program), bytes);
     }
-    h.svm.addProgramWithLoader(PROGRAM, readFileSync(new URL('../target/deploy/once.so', import.meta.url)), LOADER);
+    h.svm.addProgramWithLoader(PROGRAM, readFileSync(options.binary ?? new URL('../target/deploy/once.so', import.meta.url)), LOADER);
     [h.admin, h.writer, h.buyer, h.stranger] = await Promise.all(Array.from({ length: 4 }, () => generateKeyPairSigner()));
     for (const w of [h.admin, h.writer, h.buyer, h.stranger]) h.svm.airdrop(w.address, lamports(100_000_000_000n));
     h.programData = (await getProgramDerivedAddress({ programAddress: LOADER, seeds: [getAddressEncoder().encode(PROGRAM)] }))[0];

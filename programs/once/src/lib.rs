@@ -45,6 +45,7 @@ pub mod once {
             lock_amount,
             next_id: 0,
             bump: ctx.bumps.config,
+            gate_floor: 0,
         });
         emit_cpi!(Initialized {
             admin,
@@ -58,6 +59,10 @@ pub mod once {
     pub fn set_once(ctx: Context<SetOnce>) -> Result<()> {
         let mint = ctx.accounts.once_mint.key();
         let owner = *ctx.accounts.once_mint.to_account_info().owner;
+        ctx.accounts.config.gate_floor = Clock::get()?
+            .slot
+            .checked_add(ctx.accounts.config.gate_slots)
+            .ok_or(OnceError::Overflow)?;
         ctx.accounts.config.once_mint = Some(mint);
         ctx.accounts.config.once_token_program = Some(owner);
         emit_cpi!(OnceSet {
@@ -152,7 +157,8 @@ pub mod once {
         let clock = Clock::get()?;
         let call = &mut ctx.accounts.call;
         require!(clock.unix_timestamp < call.expiry_ts, OnceError::Expired);
-        require!(clock.slot >= call.gate_until, OnceError::InGate);
+        require!(ctx.accounts.config.once_mint.is_some(), OnceError::OnceNotSet);
+        require!(clock.slot >= gate_end(call, &ctx.accounts.config), OnceError::InGate);
         require!(ctx.accounts.vault.amount >= call.lot, OnceError::VaultShort);
         transfer(
             ctx.accounts.usdc_token_program.key(),
@@ -203,7 +209,7 @@ pub mod once {
             locker: ctx.accounts.buyer.key(),
             call: call.key(),
             amount,
-            release_slot: call.gate_until,
+            release_slot: gate_end(call, &ctx.accounts.guard.config),
             bump: ctx.bumps.lock,
         });
         transfer(

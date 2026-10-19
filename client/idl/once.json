@@ -835,6 +835,7 @@
       "accounts": [
         {
           "name": "admin",
+          "writable": true,
           "signer": true,
           "relations": [
             "config"
@@ -861,6 +862,10 @@
         },
         {
           "name": "once_mint"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         },
         {
           "name": "event_authority"
@@ -1548,6 +1553,10 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "gate_floor",
+            "type": "u64"
           }
         ]
       }

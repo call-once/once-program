@@ -61,6 +61,7 @@ export type Config = {
   lockAmount: bigint;
   nextId: bigint;
   bump: number;
+  gateFloor: bigint;
 };
 
 export type ConfigArgs = {
@@ -72,6 +73,7 @@ export type ConfigArgs = {
   lockAmount: number | bigint;
   nextId: number | bigint;
   bump: number;
+  gateFloor: number | bigint;
 };
 
 /** Gets the encoder for {@link ConfigArgs} account data. */
@@ -87,6 +89,7 @@ export function getConfigEncoder(): Encoder<ConfigArgs> {
       ["lockAmount", getU64Encoder()],
       ["nextId", getU64Encoder()],
       ["bump", getU8Encoder()],
+      ["gateFloor", getU64Encoder()],
     ]),
     (value) => ({ ...value, discriminator: CONFIG_DISCRIMINATOR }),
   );
@@ -104,6 +107,7 @@ export function getConfigDecoder(): Decoder<Config> {
     ["lockAmount", getU64Decoder()],
     ["nextId", getU64Decoder()],
     ["bump", getU8Decoder()],
+    ["gateFloor", getU64Decoder()],
   ]);
 }
 

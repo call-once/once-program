@@ -34,13 +34,13 @@ Held by `cancel` and `reclaim` and their accounts in `contexts.rs`. `cancel` tak
 
 Checked by `P4 expiry boundary, writer and holder authorization, final states` and `P2 admin cannot exercise, cancel, reclaim, or return another wallet lock`.
 
-**5. The call of claim 1, which for `gate_slots` slots after writing can be bought only by a wallet that locks ONCE against it, the ONCE being returned whole.**
+**5. The call of claim 1, which cannot be bought before ONCE is issued and, for `gate_slots` slots after writing or after ONCE is issued, whichever is later, can be bought only by a wallet that locks ONCE against it, the ONCE being returned whole.**
 
-Held by `write`, `buy`, `lock_and_buy` and `return_lock`. Once the ONCE mint is set, `write` stamps `gate_until`: the write slot plus `gate_slots`. Before that slot `buy` fails with `InGate`, and only `lock_and_buy` can buy. It moves `lock_amount` ONCE into a lock vault at `["lock_vault", call]`, then pays the premium. From `gate_until` on, `return_lock` sends the whole lock vault back to the wallet that locked it, and to no other (`NotLocker`). One lock serves one call.
+Held by `set_once`, `write`, `buy`, `lock_and_buy` and `return_lock`. Before the ONCE mint is set, both purchases fail with `OnceNotSet`. `set_once` stamps `gate_floor`, the registration slot plus `gate_slots`; a call written before it opens behind the gate until `gate_floor`. Once the mint is set, `write` stamps `gate_until`: the write slot plus `gate_slots`. `gate_end` selects the end for each call. Before that slot `buy` fails with `InGate`, and only `lock_and_buy` can buy. It moves `lock_amount` ONCE into a lock vault at `["lock_vault", call]`, records that end as the lock's `release_slot`, then pays the premium. From `release_slot` on, `return_lock` sends the whole lock vault back to the wallet that locked it, and to no other (`NotLocker`). One lock serves one call.
 
-`gate_slots` is in the config account and callonce.xyz prints it. Calls written before the ONCE mint is set have no gate.
+`gate_slots` is in the config account and callonce.xyz prints it. Changing it does not move `gate_floor`, an existing call's `gate_until`, or an existing lock's `release_slot`.
 
-Checked by `half-open priority interval and duplicate purchase` and `first-slot lock and returns after exercise and reclaim`, each run with ONCE under the Token and the Token-2022 program, and by `P3 calls written before set_once have no interval, including their write slot`.
+Checked by `half-open priority interval and duplicate purchase` and `first-slot lock and returns after exercise and reclaim`, each run with ONCE under the Token and the Token-2022 program; `P3 before ONCE registration both purchases fail; write, cancel and expiry reclaim remain available`; and `P3 pre-registration calls use the registration gate and return the whole lock`, run under both token programs with earlier-slot and same-slot writing. `v1 init only survives upgrade and set_once reallocates to 171 bytes` and `v1 init and an open call survives upgrade and set_once reallocates to 171 bytes` check the upgrade of existing accounts.
 
 **6. The call of claim 1, written on any stock token whose mint passes the check at writing.**
 
@@ -58,7 +58,7 @@ The numbers are the reference numerals in the drawings on callonce.xyz.
 | (12) | stock | the vault, a token account at `["vault", call]` owned by the call |
 | (16) | strike | `Call.strike`, a total in raw USDC units for the whole lot |
 | (18) | pin | `Call.state`: `Open` or `Held` while the stock is inside, `Exercised`, `Reclaimed` or `Cancelled` once it has left. No instruction sets it back |
-| (24) | gate | `Call.gate_until`, a slot |
+| (24) | gate | `Call.gate_until`, or `Config.gate_floor` for a call written before ONCE was set |
 | (28) | lock | `Lock` account at `["lock", call]` and its token account at `["lock_vault", call]` |
 | (30) | holder's mark | `Call.holder` |
 | (32) | ONCE | the mint in `Config.once_mint`; the config account is at `["config"]` |
@@ -68,12 +68,12 @@ The numbers are the reference numerals in the drawings on callonce.xyz.
 | Instruction | Signer | When | What happens |
 |---|---|---|---|
 | `write` | writer | lot, strike and premium above zero, expiry in the future, the mint passes the check | Moves the lot, a whole number of raw units, into the vault, and fixes the total strike in USDC, the premium and the expiry time |
-| `buy` | buyer | open, gate open, before expiry | Pays the premium to the writer; the buyer becomes the holder |
+| `buy` | buyer | open, ONCE set, gate open, before expiry | Pays the premium to the writer; the buyer becomes the holder |
 | `lock_and_buy` | buyer | open, gate shut, before expiry | Locks `lock_amount` ONCE against the call, then buys as above |
 | `call` | holder | held, before expiry | Pays the strike to the writer; the lot moves to the holder; the vault closes |
 | `cancel` | writer | open | Returns the lot to the writer; the vault closes |
 | `reclaim` | writer | open or held, at or after expiry | Returns the lot to the writer; the vault closes |
-| `return_lock` | locker | from `gate_until` | Returns all of the locked ONCE to the locker; the lock closes |
+| `return_lock` | locker | from the lock's `release_slot` | Returns all of the locked ONCE to the locker; the lock closes |
 | `init`, `set_once`, `set_params` | upgrade authority, admin | | Configuration. None of them can move the stock in a vault or the ONCE in a lock |
 
 Expiry is checked against the chain clock (`Clock::unix_timestamp`). The gate is counted in slots.
