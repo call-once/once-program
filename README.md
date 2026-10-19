@@ -1,3 +1,5 @@
+![FIG. 4. A call cut open: the stock (12) held by the pin (18) in the housing (10). The stock is the guarantee.](.github/fig4.png)
+
 # once
 
 A Solana program in which a call option holds the tokenized stock it promises. The writer puts the stock in when the call is written. The holder pays the strike once, before expiry, and the stock and the USDC change places in one transaction.
@@ -80,7 +82,6 @@ Expiry is checked against the chain clock (`Clock::unix_timestamp`). The gate is
 
 - The program has not been audited.
 - It is upgradeable. The upgrade authority can replace its code, so the claims describe the program as it is deployed now. `solana program show 24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93` names that key.
-- The admin in the config account can change `gate_slots` and `lock_amount`. A call keeps the gate it was written with, and a lock returns the amount it took (`parameters affect only new calls and new locks; old lock returns its original amount`). The admin sets the ONCE mint once; a second `set_once` fails with `OnceAlreadySet`.
 - xStocks carry a freeze authority, a pause and a permanent delegate, and this program cannot remove them. A frozen or paused mint stops a call from settling. A permanent delegate can move the stock out of a vault; a call whose vault is short cannot be bought or exercised, and the writer takes back what is left.
 - The gate narrows the race for a new call to wallets that hold ONCE. It does not end it: inside the gate, the first lock to land wins.
 
