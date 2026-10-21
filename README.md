@@ -4,7 +4,7 @@
 
 A Solana program in which a call option holds the tokenized stock it promises. The writer puts the stock in when the call is written. The holder pays the strike once, before expiry, and the stock and the USDC change places in one transaction.
 
-Program `24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93` on Solana mainnet.
+Program `GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa` on Solana mainnet.
 
 callonce.xyz is the specification: it draws the device and states six claims. This repository is the device. Each claim below names the code that holds it and the test that checks it, and the program on mainnet is the deterministic build of this code. A claim can be checked here instead of taken from the page.
 
@@ -81,7 +81,7 @@ Expiry is checked against the chain clock (`Clock::unix_timestamp`). The gate is
 ## What is left to trust
 
 - The program has not been audited.
-- It is upgradeable. The upgrade authority can replace its code, so the claims describe the program as it is deployed now. `solana program show 24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93` names that key.
+- It is upgradeable. The upgrade authority can replace its code, so the claims describe the program as it is deployed now. `solana program show GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa` names that key.
 - xStocks carry a freeze authority, a pause and a permanent delegate, and this program cannot remove them. A frozen or paused mint stops a call from settling. A permanent delegate can move the stock out of a vault; a call whose vault is short cannot be bought or exercised, and the writer takes back what is left.
 - The gate narrows the race for a new call to wallets that hold ONCE. It does not end it: inside the gate, the first lock to land wins.
 
@@ -92,7 +92,7 @@ The program on mainnet is the `solana-verify` build of this repository.
     cargo install solana-verify --version 0.5.2 --locked
     solana-verify build --library-name once
     solana-verify get-executable-hash target/deploy/once.so
-    solana-verify get-program-hash -u https://api.mainnet-beta.solana.com 24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93
+    solana-verify get-program-hash -u https://api.mainnet-beta.solana.com GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa
 
 The two hashes are the same. Every push runs this build in GitHub Actions, runs the tests against the binary it built, and keeps the binary and its hash as the `once-verifiable-build` artifact.
 

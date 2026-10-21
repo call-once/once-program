@@ -1,49 +1,7 @@
-import { beforeAll, describe, expect, test } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { expect, test } from 'vitest';
 import { unwrapOption } from '@solana/kit';
-import { Harness, accountData, amount, PROGRAM } from './harness.js';
-import { TOKEN, TOKEN_2022, LOADER } from '../client/constants.js';
-
-const v1 = new URL('./fixtures/once-v1.so', import.meta.url);
-const current = new URL('../target/deploy/once.so', import.meta.url);
-beforeAll(() => {
-  const bytes = readFileSync(v1);
-  // The verifier hashes the executable without its trailing zero padding.
-  expect(createHash('sha256').update(bytes.subarray(0, bytes.findLastIndex(b => b !== 0) + 1)).digest('hex'))
-    .toBe('a7ecfe427cdaad0c500f9df6b2d6ab45e4436eb6c8aa5abe4e968be5e9d68f23');
-  expect(createHash('sha256').update(bytes).digest('hex'))
-    .toBe('28ac02da7ae848b71fc7ba9918222026d8a08998b7da3e26b78b714d960e04e7');
-});
-
-describe('Config upgrade from v1', () => {
-  for (const written of [false, true]) test(`v1 init${written ? ' and an open call' : ' only'} survives upgrade and set_once reallocates to 171 bytes`, async () => {
-    const h = await Harness.create({ binary: v1 });
-    const c = written ? await h.write() : null;
-    expect(accountData(h.svm, h.config).length).toBe(163);
-    h.svm.addProgramWithLoader(PROGRAM, readFileSync(current), LOADER);
-    expect(h.configState().gateFloor).toBe(0n);
-    expect(unwrapOption(h.configState().onceMint)).toBeNull();
-    h.slot(2000n);
-    await h.send('set_once_after_upgrade', h.setOnceIx(), h.admin);
-    const floor = 2151n;
-    expect(accountData(h.svm, h.config).length).toBe(171);
-    expect(h.configState().gateFloor).toBe(floor);
-    expect(unwrapOption(h.configState().onceMint)).toBe(h.onceMint);
-    if (c) {
-      expect(h.callState(c).gateUntil).toBe(h.callState(c).writtenSlot);
-      await h.send('upgraded_buy_in_gate', h.buyIx(c), h.buyer, 'InGate');
-      const before = amount(h.svm, h.buyerOnce);
-      await h.send('upgraded_lock_buy', h.lockBuyIx(c), h.buyer);
-      expect(h.lockState(c).releaseSlot).toBe(floor);
-      h.slot(floor - 1n);
-      await h.send('upgraded_early_return', h.returnIx(c), h.buyer, 'LockNotReleased');
-      h.slot(floor);
-      await h.send('upgraded_return', h.returnIx(c), h.buyer);
-      expect(amount(h.svm, h.buyerOnce)).toBe(before);
-    }
-  });
-});
+import { Harness, amount } from './harness.js';
+import { TOKEN, TOKEN_2022 } from '../client/constants.js';
 
 test('P3 before ONCE registration both purchases fail; write, cancel and expiry reclaim remain available', async () => {
   const h = await Harness.create();

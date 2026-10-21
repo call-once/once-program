@@ -12,7 +12,7 @@ use error::OnceError;
 use events::*;
 use state::*;
 
-declare_id!("24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93");
+declare_id!("GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa");
 
 #[cfg(not(feature = "no-entrypoint"))]
 solana_security_txt::security_txt! {

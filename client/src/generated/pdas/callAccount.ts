@@ -23,7 +23,7 @@ export async function findCallAccountPda(
   config: { programAddress?: Address | undefined } = {},
 ): Promise<ProgramDerivedAddress> {
   const {
-    programAddress = "24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93" as Address<"24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93">,
+    programAddress = "GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa" as Address<"GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa">,
   } = config;
   return await getProgramDerivedAddress({
     programAddress,

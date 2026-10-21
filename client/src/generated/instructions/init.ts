@@ -58,7 +58,7 @@ export type InitInstruction<
   TProgram extends string = typeof ONCE_PROGRAM_ADDRESS,
   TAccountAuthority extends string | AccountMeta<string> = string,
   TAccountDeployment extends string | AccountMeta<string> =
-    "24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93",
+    "GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa",
   TAccountProgramData extends string | AccountMeta<string> = string,
   TAccountConfig extends string | AccountMeta<string> = string,
   TAccountUsdcMint extends string | AccountMeta<string> = string,
@@ -284,7 +284,7 @@ export async function getInitInstructionAsync<
   // Resolve default values.
   if (!accounts.deployment.value) {
     accounts.deployment.value =
-      "24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93" as Address<"24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93">;
+      "GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa" as Address<"GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa">;
   }
   if (!accounts.config.value) {
     accounts.config.value = await findConfigPda({ programAddress });
@@ -484,7 +484,7 @@ export function getInitInstruction<
   // Resolve default values.
   if (!accounts.deployment.value) {
     accounts.deployment.value =
-      "24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93" as Address<"24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93">;
+      "GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa" as Address<"GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa">;
   }
   if (!accounts.systemProgram.value) {
     accounts.systemProgram.value =

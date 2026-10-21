@@ -7,7 +7,7 @@ resolution = true
 skip-lint = false
 
 [programs.mainnet]
-once = "24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93"
+once = "GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa"
 
 
 [provider]

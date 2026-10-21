@@ -93,7 +93,7 @@ import {
 } from "../pdas/index.js";
 
 export const ONCE_PROGRAM_ADDRESS =
-  "24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93" as Address<"24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93">;
+  "GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa" as Address<"GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa">;
 
 export enum OnceAccount {
   CallAccount,
@@ -398,7 +398,7 @@ export function identifyOnceInstruction(
 }
 
 export type ParsedOnceInstruction<
-  TProgram extends string = "24R42T2e3mUnt787gnaTwSmbs1wXT2ZNrC2F3Gfuci93",
+  TProgram extends string = "GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa",
 > =
   | ({ instructionType: OnceInstruction.Buy } & ParsedBuyInstruction<TProgram>)
   | ({
