@@ -536,6 +536,264 @@ pub mod once {
         });
         Ok(())
     }
+
+    pub fn write_put(
+        ctx: Context<WritePut>,
+        id: u64,
+        lot: u64,
+        strike: u64,
+        premium: u64,
+        expiry_ts: i64,
+    ) -> Result<()> {
+        require!(
+            lot > 0 && strike > 0 && premium > 0,
+            OnceError::InvalidValue
+        );
+        let clock = Clock::get()?;
+        require!(expiry_ts > clock.unix_timestamp, OnceError::ExpiryNotFuture);
+        mint::validate_put_mint(&ctx.accounts.mint.to_account_info())?;
+        let config = &mut ctx.accounts.guard.config;
+        let gate_until = if config.once_mint.is_some() {
+            clock
+                .slot
+                .checked_add(config.gate_slots)
+                .ok_or(OnceError::Overflow)?
+        } else {
+            clock.slot
+        };
+        let next_id = config.next_id.checked_add(1).ok_or(OnceError::Overflow)?;
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            strike,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.vault.reload()?;
+        require_eq!(ctx.accounts.vault.amount, strike, OnceError::DepositMismatch);
+        ctx.accounts.put.set_inner(Put {
+            id,
+            writer: ctx.accounts.writer.key(),
+            mint: ctx.accounts.mint.key(),
+            token_program: ctx.accounts.token_program.key(),
+            lot,
+            strike,
+            premium,
+            expiry_ts,
+            written_slot: clock.slot,
+            gate_until,
+            state: CallState::Open,
+            holder: None,
+            bought_slot: 0,
+            settled_slot: 0,
+            bump: ctx.bumps.put,
+        });
+        config.next_id = next_id;
+        emit_cpi!(PutWritten {
+            put: ctx.accounts.put.key(),
+            id,
+            writer: ctx.accounts.writer.key(),
+            mint: ctx.accounts.mint.key(),
+            lot,
+            strike,
+            premium,
+            expiry_ts,
+            written_slot: clock.slot,
+            gate_until
+        });
+        Ok(())
+    }
+
+    pub fn buy_put(ctx: Context<BuyPut>) -> Result<()> {
+        let clock = Clock::get()?;
+        let put = &mut ctx.accounts.put;
+        require!(clock.unix_timestamp < put.expiry_ts, OnceError::Expired);
+        require!(ctx.accounts.config.once_mint.is_some(), OnceError::OnceNotSet);
+        require!(clock.slot >= gate_end_put(put, &ctx.accounts.config), OnceError::InGate);
+        require!(ctx.accounts.vault.amount >= put.strike, OnceError::VaultShort);
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.payment_source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            put.premium,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        put.holder = Some(ctx.accounts.buyer.key());
+        put.bought_slot = clock.slot;
+        put.state = CallState::Held;
+        emit_cpi!(PutBought {
+            put: put.key(),
+            id: put.id,
+            holder: ctx.accounts.buyer.key(),
+            premium: put.premium,
+            slot: clock.slot,
+            locked: 0
+        });
+        Ok(())
+    }
+
+    pub fn lock_and_buy_put(ctx: Context<LockAndBuyPut>) -> Result<()> {
+        let clock = Clock::get()?;
+        let put = &mut ctx.accounts.guard.put;
+        let amount = ctx.accounts.guard.config.lock_amount;
+        require!(ctx.accounts.vault.amount >= put.strike, OnceError::VaultShort);
+        transfer(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.once_source.to_account_info(),
+            ctx.accounts.once_mint.to_account_info(),
+            ctx.accounts.lock_vault.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            amount,
+            ctx.accounts.once_mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.lock_vault.reload()?;
+        require_eq!(ctx.accounts.lock_vault.amount, amount, OnceError::DepositMismatch);
+        ctx.accounts.lock.set_inner(Lock {
+            locker: ctx.accounts.buyer.key(),
+            call: put.key(),
+            amount,
+            release_slot: gate_end_put(put, &ctx.accounts.guard.config),
+            bump: ctx.bumps.lock,
+        });
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.payment_source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            put.premium,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        put.holder = Some(ctx.accounts.buyer.key());
+        put.bought_slot = clock.slot;
+        put.state = CallState::Held;
+        emit_cpi!(PutBought {
+            put: put.key(),
+            id: put.id,
+            holder: ctx.accounts.buyer.key(),
+            premium: put.premium,
+            slot: clock.slot,
+            locked: amount
+        });
+        Ok(())
+    }
+
+    pub fn exercise_put(ctx: Context<ExercisePut>) -> Result<()> {
+        let clock = Clock::get()?;
+        let put = &mut ctx.accounts.put;
+        require!(clock.unix_timestamp < put.expiry_ts, OnceError::Expired);
+        require!(ctx.accounts.vault.amount >= put.strike, OnceError::VaultShort);
+        let before = ctx.accounts.stock_destination.amount;
+        transfer(
+            ctx.accounts.token_program.key(),
+            ctx.accounts.stock_source.to_account_info(),
+            ctx.accounts.mint.to_account_info(),
+            ctx.accounts.stock_destination.to_account_info(),
+            ctx.accounts.holder.to_account_info(),
+            put.lot,
+            ctx.accounts.mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.stock_destination.reload()?;
+        require_eq!(
+            ctx.accounts.stock_destination.amount,
+            before.checked_add(put.lot).ok_or(OnceError::Overflow)?,
+            OnceError::DepositMismatch
+        );
+        let id = put.id.to_le_bytes();
+        let seeds: &[&[u8]] = &[b"put", &id, &[put.bump]];
+        let paid = ctx.accounts.vault.amount;
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+            put.to_account_info(),
+            paid,
+            ctx.accounts.usdc_mint.decimals,
+            &[seeds],
+        )?;
+        close(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            put.to_account_info(),
+            &[seeds],
+        )?;
+        put.state = CallState::Exercised;
+        put.settled_slot = clock.slot;
+        emit_cpi!(PutExercised {
+            put: put.key(),
+            id: put.id,
+            holder: ctx.accounts.holder.key(),
+            writer: put.writer,
+            delivered: put.lot,
+            paid,
+            slot: clock.slot
+        });
+        Ok(())
+    }
+
+    pub fn cancel_put(ctx: Context<CancelPut>) -> Result<()> {
+        let put = &mut ctx.accounts.put;
+        let returned = ctx.accounts.vault.amount;
+        settle_put(
+            put,
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            returned,
+            ctx.accounts.usdc_mint.decimals,
+        )?;
+        put.state = CallState::Cancelled;
+        put.settled_slot = Clock::get()?.slot;
+        emit_cpi!(PutCancelled {
+            put: put.key(),
+            id: put.id,
+            writer: put.writer,
+            returned,
+            slot: put.settled_slot
+        });
+        Ok(())
+    }
+
+    pub fn reclaim_put(ctx: Context<ReclaimPut>) -> Result<()> {
+        let clock = Clock::get()?;
+        let put = &mut ctx.accounts.put;
+        require!(clock.unix_timestamp >= put.expiry_ts, OnceError::NotExpired);
+        let returned = ctx.accounts.vault.amount;
+        settle_put(
+            put,
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            returned,
+            ctx.accounts.usdc_mint.decimals,
+        )?;
+        put.state = CallState::Reclaimed;
+        put.settled_slot = clock.slot;
+        emit_cpi!(PutReclaimed {
+            put: put.key(),
+            id: put.id,
+            writer: put.writer,
+            holder: put.holder,
+            returned,
+            slot: clock.slot
+        });
+        Ok(())
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -607,4 +865,30 @@ fn settle<'info>(
         &[seeds],
     )?;
     close(program, vault, writer, call.to_account_info(), &[seeds])
+}
+
+#[allow(clippy::too_many_arguments)]
+fn settle_put<'info>(
+    put: &Account<'info, Put>,
+    program: Pubkey,
+    vault: AccountInfo<'info>,
+    mint: AccountInfo<'info>,
+    destination: AccountInfo<'info>,
+    writer: AccountInfo<'info>,
+    amount: u64,
+    decimals: u8,
+) -> Result<()> {
+    let id = put.id.to_le_bytes();
+    let seeds: &[&[u8]] = &[b"put", &id, &[put.bump]];
+    transfer(
+        program,
+        vault.clone(),
+        mint,
+        destination,
+        put.to_account_info(),
+        amount,
+        decimals,
+        &[seeds],
+    )?;
+    close(program, vault, writer, put.to_account_info(), &[seeds])
 }

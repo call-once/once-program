@@ -70,6 +70,8 @@ export const ONCE_ERROR__OVERFLOW = 0x1789; // 6025
 export const ONCE_ERROR__NOT_SELLER = 0x178a; // 6026
 /** PriceChanged: Listing price differs from the price agreed */
 export const ONCE_ERROR__PRICE_CHANGED = 0x178b; // 6027
+/** NonTransferableMint: Stock mint does not allow transfers */
+export const ONCE_ERROR__NON_TRANSFERABLE_MINT = 0x178c; // 6028
 
 export type OnceError =
   | typeof ONCE_ERROR__ALREADY_SETTLED
@@ -82,6 +84,7 @@ export type OnceError =
   | typeof ONCE_ERROR__IN_GATE
   | typeof ONCE_ERROR__INVALID_VALUE
   | typeof ONCE_ERROR__LOCK_NOT_RELEASED
+  | typeof ONCE_ERROR__NON_TRANSFERABLE_MINT
   | typeof ONCE_ERROR__NOT_ADMIN
   | typeof ONCE_ERROR__NOT_EXPIRED
   | typeof ONCE_ERROR__NOT_HELD
@@ -114,6 +117,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [ONCE_ERROR__IN_GATE]: `Public purchase is unavailable during the priority interval`,
     [ONCE_ERROR__INVALID_VALUE]: `Amounts and gate length must be positive`,
     [ONCE_ERROR__LOCK_NOT_RELEASED]: `Lock release slot has not arrived`,
+    [ONCE_ERROR__NON_TRANSFERABLE_MINT]: `Stock mint does not allow transfers`,
     [ONCE_ERROR__NOT_ADMIN]: `Only the admin may update configuration`,
     [ONCE_ERROR__NOT_EXPIRED]: `Call has not expired`,
     [ONCE_ERROR__NOT_HELD]: `Call is not held`,

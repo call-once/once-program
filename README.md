@@ -2,11 +2,11 @@
 
 # once
 
-A Solana program in which a call option holds the tokenized stock it promises. The writer puts the stock in when the call is written. The holder pays the strike once, before expiry, and the stock and the USDC change places in one transaction.
+A Solana program in which a call option holds the tokenized stock it promises. The writer puts the stock in when the call is written. The holder pays the strike once, before expiry, and the stock and the USDC change places in one transaction. A put is the same device turned around: the writer puts in the USDC of the strike, and the holder hands over the stock once, before expiry, for it.
 
 Program `GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa` on Solana mainnet.
 
-callonce.xyz is the specification: it draws the device and states seven claims. This repository is the device. Each claim below names the code that holds it and the test that checks it, and the program on mainnet is the deterministic build of this code. A claim can be checked here instead of taken from the page.
+callonce.xyz is the specification: it draws the device and states nine claims. This repository is the device. Each claim below names the code that holds it and the test that checks it, and the program on mainnet is the deterministic build of this code. A claim can be checked here instead of taken from the page.
 
 ## Claims
 
@@ -52,18 +52,30 @@ Checked by `P7 mint rejection matches client inspection; classic mint is accepte
 
 Held by `list`, `buy_listed` and `lock_and_buy_listed`; checked by `tests/resale.test.ts`.
 
+**8. A put option that holds, from the slot it is written, the total strike in USDC it promises, and releases it once to whoever holds the put when they hand over the exact raw amount of stock it names, the stock going to its writer in the same transaction.**
+
+Held by `write_put` and `exercise_put` in `lib.rs`, and their accounts in `contexts.rs`. Writing deposits exactly the strike. Only the holder may hand over the exact lot to any token account the writer owns for that stock, receiving the whole USDC vault in the same transaction; the vault closes to the writer. No other instruction releases it except the writer's cancellation or expiry reclaim.
+
+Checked by `write: strike moves into the USDC vault; buy only after the gate; exercise swaps the lot for the strike`, `the writer cannot keep the lot out: a memo-gated, reassigned or own account is replaced in the same transaction`, and `a confidential-transfer account of the writer is replaced by a fresh one` in `tests/put.test.ts`.
+
+**9. The put of claim 8, which reads no price at any step and, for the slots of claim 5, can be bought only by a wallet that locks ONCE against it, the ONCE being returned whole.**
+
+Held by `BuyPut`, `PutGateGuard`, `LockAndBuyPut` and `ExercisePut` in `contexts.rs`: none takes a price account. `gate_end_put` applies the same gate as a call; `return_lock` returns the whole lock to its locker.
+
+Checked by `inside the gate only with the ONCE lock; the lock returns through return_lock` and `before ONCE registration puts inherit gate_floor; call and put locks cannot open each other` in `tests/put.test.ts`.
+
 ## Parts
 
 The numbers are the reference numerals in the drawings on callonce.xyz.
 
 | | Part | On chain |
 |---|---|---|
-| (10) | housing | `Call` account at `["call", id]`, the id as a little-endian u64 |
+| (10) | housing | `Call` account at `["call", id]`, the id as a little-endian u64; a put is a `Put` account at `["put", id]`, numbered in the same sequence as calls |
 | (12) | stock | the vault, a token account at `["vault", call]` owned by the call |
-| (16) | strike | `Call.strike`, a total in raw USDC units for the whole lot |
+| (16) | strike | `Call.strike`, a total in raw USDC units for the whole lot; in a put, the strike sits in its vault, a USDC token account at `["put_vault", put]` owned by the put |
 | (18) | pin | `Call.state`: `Open` or `Held` while the stock is inside, `Exercised`, `Reclaimed` or `Cancelled` once it has left. No instruction sets it back |
 | (24) | gate | `Call.gate_until`, or `Config.gate_floor` for a call written before ONCE was set |
-| (28) | lock | `Lock` account at `["lock", call]` and its token account at `["lock_vault", call]`; a purchase from a holder inside the gate locks into a `ResaleLock` at `["resale_lock", call, buyer]` and its token account at `["resale_lock_vault", call, buyer]`, one per wallet and call, adding `lock_amount` on each such purchase |
+| (28) | lock | `Lock` account at `["lock", call]` and its token account at `["lock_vault", call]`; a purchase from a holder inside the gate locks into a `ResaleLock` at `["resale_lock", call, buyer]` and its token account at `["resale_lock_vault", call, buyer]`, one per wallet and call, adding `lock_amount` on each such purchase; a put's lock is a `Lock` at `["lock", put]`, whose `call` field holds the put |
 | (30) | holder's mark | `Call.holder`; a price the holder names sits in a `Listing` account at `["listing", call]` |
 | (32) | ONCE | the mint in `Config.once_mint`; the config account is at `["config"]` |
 
@@ -83,6 +95,12 @@ The numbers are the reference numerals in the drawings on callonce.xyz.
 | `buy_listed` | buyer | held, before expiry, gate open, signed price matches | Pays the holder that price, passes the call to the buyer and returns listing rent to the seller; the stock stays in its vault |
 | `lock_and_buy_listed` | buyer | held, before expiry, gate shut, signed price matches | Adds a fresh `lock_amount` to the buyer's resale lock, then buys as above |
 | `return_resale_lock` | locker | from the lock's `release_slot` | Returns the entire resale vault balance and closes both lock accounts to the locker |
+| `write_put` | writer | lot, strike and premium above zero, expiry in the future, the mint passes the check and is not non-transferable | Moves the strike USDC into the put's vault; fixes the stock lot, premium and expiry |
+| `buy_put` | buyer | open, ONCE set, gate open, before expiry, vault holds at least the strike | Pays the premium to the writer; the buyer becomes the holder |
+| `lock_and_buy_put` | buyer | open, ONCE set, gate shut, before expiry, vault holds at least the strike | Locks `lock_amount` ONCE against the put, then buys as above |
+| `exercise_put` | holder | held, before expiry, vault holds at least the strike | The lot goes to any token account the writer owns for that stock; the whole USDC vault moves to the holder and closes, its rent to the writer |
+| `cancel_put` | writer | open | Returns the whole USDC vault to the writer; the vault closes |
+| `reclaim_put` | writer | open or held, at or after expiry | Returns the whole USDC vault to the writer; the vault closes |
 | `init`, `set_once`, `set_params` | upgrade authority, admin | | Configuration. None of them can move the stock in a vault or the ONCE in a lock |
 
 Expiry is checked against the chain clock (`Clock::unix_timestamp`). The gate is counted in slots.
@@ -91,7 +109,7 @@ Expiry is checked against the chain clock (`Clock::unix_timestamp`). The gate is
 
 - The program has not been audited.
 - It is upgradeable. The upgrade authority can replace its code, so the claims describe the program as it is deployed now. `solana program show GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa` names that key.
-- xStocks carry a freeze authority, a pause and a permanent delegate, and this program cannot remove them. A frozen or paused mint stops a call from settling. A permanent delegate can move the stock out of a vault; a call whose vault is short cannot be bought or exercised, and the writer takes back what is left.
+- xStocks carry a freeze authority, a pause and a permanent delegate, and this program cannot remove them. A frozen or paused mint stops a call from settling. A permanent delegate can move the stock out of a vault; a call whose vault is short cannot be bought or exercised, and the writer takes back what is left. For a put, a frozen account or a paused mint stops the holder from handing over the stock, and at expiry the writer takes the USDC back.
 - The gate narrows the race for a new call to wallets that hold ONCE. It does not end it: inside the gate, the first lock to land wins.
 
 ## Build and verify

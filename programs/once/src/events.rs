@@ -104,3 +104,57 @@ pub struct ResaleLockReturned {
     pub returned: u64,
     pub slot: u64,
 }
+
+#[event]
+pub struct PutWritten {
+    pub put: Pubkey,
+    pub id: u64,
+    pub writer: Pubkey,
+    pub mint: Pubkey,
+    pub lot: u64,
+    pub strike: u64,
+    pub premium: u64,
+    pub expiry_ts: i64,
+    pub written_slot: u64,
+    pub gate_until: u64,
+}
+
+#[event]
+pub struct PutBought {
+    pub put: Pubkey,
+    pub id: u64,
+    pub holder: Pubkey,
+    pub premium: u64,
+    pub slot: u64,
+    pub locked: u64,
+}
+
+#[event]
+pub struct PutExercised {
+    pub put: Pubkey,
+    pub id: u64,
+    pub holder: Pubkey,
+    pub writer: Pubkey,
+    pub delivered: u64,
+    pub paid: u64,
+    pub slot: u64,
+}
+
+#[event]
+pub struct PutCancelled {
+    pub put: Pubkey,
+    pub id: u64,
+    pub writer: Pubkey,
+    pub returned: u64,
+    pub slot: u64,
+}
+
+#[event]
+pub struct PutReclaimed {
+    pub put: Pubkey,
+    pub id: u64,
+    pub writer: Pubkey,
+    pub holder: Option<Pubkey>,
+    pub returned: u64,
+    pub slot: u64,
+}

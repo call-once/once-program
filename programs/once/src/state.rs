@@ -80,3 +80,31 @@ pub struct ResaleLock {
     pub release_slot: u64,
     pub bump: u8,
 }
+
+pub fn gate_end_put(put: &Put, config: &Config) -> u64 {
+    if put.gate_until == put.written_slot {
+        config.gate_floor
+    } else {
+        put.gate_until
+    }
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Put {
+    pub id: u64,
+    pub writer: Pubkey,
+    pub mint: Pubkey,
+    pub token_program: Pubkey,
+    pub lot: u64,
+    pub strike: u64,
+    pub premium: u64,
+    pub expiry_ts: i64,
+    pub written_slot: u64,
+    pub gate_until: u64,
+    pub state: CallState,
+    pub holder: Option<Pubkey>,
+    pub bought_slot: u64,
+    pub settled_slot: u64,
+    pub bump: u8,
+}

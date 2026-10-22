@@ -58,4 +58,6 @@ pub enum OnceError {
     NotSeller,
     #[msg("Listing price differs from the price agreed")]
     PriceChanged,
+    #[msg("Stock mint does not allow transfers")]
+    NonTransferableMint,
 }

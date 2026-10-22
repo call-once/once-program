@@ -246,6 +246,26 @@ export class Harness {
             price: listing.price, slot: call.boughtSlot, locked: ixs.some(ix => ix.programAddress === PROGRAM && once.LOCK_AND_BUY_LISTED_DISCRIMINATOR.every((v,i) => ix.data?.[i] === v)) ? this.configState().lockAmount : 0n });
           expect(old.holder).toEqual({ __option: 'Some', value: listing.seller });
           expect(this.svm.getAccount(at).exists).toBe(false);
+        } else if ('put' in event.data) {
+          const d = event.data as any, put = once.getPutDecoder().decode(accountData(this.svm, d.put));
+          const vaultAddress = (await getProgramDerivedAddress({ programAddress: PROGRAM, seeds: ['put_vault', getAddressEncoder().encode(d.put)] }))[0];
+          const priorVault = priorByKey.get(vaultAddress);
+          const held = priorVault?.exists && priorVault.data.length >= 72 ? Buffer.from(priorVault.data).readBigUInt64LE(64) : 0n;
+          const common = { put: d.put, id: put.id };
+          if (event.name === 'PutWritten') expect(d).toEqual({ ...common, writer: put.writer, mint: put.mint, lot: put.lot, strike: put.strike,
+            premium: put.premium, expiryTs: put.expiryTs, writtenSlot: put.writtenSlot, gateUntil: put.gateUntil });
+          if (event.name === 'PutBought') {
+            const lock = this.svm.getAccount((await findLockPda(d.put))[0]);
+            expect(d).toEqual({ ...common, holder: unwrapOption(put.holder), premium: put.premium, slot: put.boughtSlot,
+              locked: lock.exists ? once.getLockDecoder().decode(lock.data).amount : 0n });
+          }
+          if (event.name === 'PutExercised') {
+            expect(d).toEqual({ ...common, holder: unwrapOption(put.holder), writer: put.writer, delivered: put.lot, paid: held, slot: put.settledSlot });
+            expect(put.state).toBe(once.CallState.Exercised);
+          }
+          if (event.name === 'PutCancelled') { expect(d).toEqual({ ...common, writer: put.writer, returned: held, slot: put.settledSlot }); expect(put.state).toBe(once.CallState.Cancelled); }
+          if (event.name === 'PutReclaimed') { expect(d).toEqual({ ...common, writer: put.writer, holder: put.holder, returned: held, slot: put.settledSlot }); expect(put.state).toBe(once.CallState.Reclaimed); }
+          if (['PutExercised', 'PutCancelled', 'PutReclaimed'].includes(event.name)) expect(this.svm.getAccount(vaultAddress).exists).toBe(false);
         } else if (event.name === 'LockReturned' || event.name === 'ResaleLockReturned') {
           const resale = event.name === 'ResaleLockReturned';
           const lockAddress = (await (resale ? findResaleLockPda(event.data.call, event.data.locker) : findLockPda(event.data.call)))[0];

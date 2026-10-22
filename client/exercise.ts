@@ -7,7 +7,7 @@ import {
 import { getInitializeAccount3Instruction } from '@solana-program/token-2022';
 import { getCreateAccountInstruction } from '@solana-program/system';
 import { getCallInstruction } from './src/generated/index.js';
-import { tokenAccountOwner } from './mint.js';
+import { canReceive, tokenAccountOwner, tokenAccountSpace } from './mint.js';
 
 export type ExerciseAccount = { programAddress: Address; data: Uint8Array };
 export type ExerciseRpc = {
@@ -52,4 +52,30 @@ export async function buildExerciseInstructions(input: Input, rpc: ExerciseRpc, 
   const instructions = [...payment.instructions,
     getCallInstruction({ ...input, paymentDestination: payment.destination }, programAddress ? { programAddress } : undefined)];
   return { instructions, paymentDestination: payment.destination };
+}
+
+export type WriterStockInput = { writer: Address; mint: Address; tokenProgram: Address; payer: TransactionSigner; avoid?: Address };
+
+/** The put writer's stock account to deliver into: the ATA, made if missing, or a fresh account when the ATA cannot take the lot. */
+export async function writerStockDestination(input: WriterStockInput, rpc: ExerciseRpc): Promise<{
+  instructions: Instruction[]; destination: Address; extraSigner?: KeyPairSigner;
+}> {
+  const { writer, mint, tokenProgram: program, payer } = input;
+  const canonical = (await findAssociatedTokenPda({ owner: writer, mint, tokenProgram: program }))[0];
+  const account = await rpc.getAccount(canonical);
+  if (account === null && input.avoid !== canonical) {
+    return { instructions: [await getCreateAssociatedTokenIdempotentInstructionAsync({ payer, owner: writer, mint, tokenProgram: program })], destination: canonical };
+  }
+  if (input.avoid === canonical || account === null || account.programAddress !== program || tokenAccountOwner(account.data) !== writer ||
+      getAddressDecoder().decode(account.data.subarray(0, 32)) !== mint || !canReceive(account.data)) {
+    const mintAccount = await rpc.getAccount(mint);
+    if (!mintAccount) throw new Error('Missing mint');
+    const space = tokenAccountSpace(program, mintAccount.data);
+    const fresh = await generateKeyPairSigner();
+    return { instructions: [
+      getCreateAccountInstruction({ payer, newAccount: fresh, space: BigInt(space), lamports: await rpc.minimumBalance(space), programAddress: program }),
+      getInitializeAccount3Instruction({ account: fresh.address, mint, owner: writer }, { programAddress: program }),
+    ], destination: fresh.address, extraSigner: fresh };
+  }
+  return { instructions: [], destination: canonical };
 }

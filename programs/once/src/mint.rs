@@ -39,3 +39,17 @@ pub fn validate_mint(account: &AccountInfo<'_>) -> Result<()> {
     }
     Ok(())
 }
+
+/// A put takes the stock in at exercise, so its mint must also let the stock move.
+pub fn validate_put_mint(account: &AccountInfo<'_>) -> Result<()> {
+    validate_mint(account)?;
+    if *account.owner == anchor_spl::token_2022::ID {
+        let data = account.try_borrow_data()?;
+        let mint = StateWithExtensions::<Mint>::unpack(&data)?;
+        require!(
+            !mint.get_extension_types()?.contains(&ExtensionType::NonTransferable),
+            OnceError::NonTransferableMint
+        );
+    }
+    Ok(())
+}
