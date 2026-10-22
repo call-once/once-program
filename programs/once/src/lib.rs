@@ -372,6 +372,170 @@ pub mod once {
         });
         Ok(())
     }
+
+    pub fn list(ctx: Context<List>, price: u64) -> Result<()> {
+        require!(price > 0, OnceError::InvalidValue);
+        let clock = Clock::get()?;
+        let call = &ctx.accounts.call;
+        require!(clock.unix_timestamp < call.expiry_ts, OnceError::Expired);
+        let holder = ctx.accounts.holder.key();
+        let listing = &mut ctx.accounts.listing;
+        require!(
+            listing.seller == Pubkey::default() || listing.seller == holder,
+            OnceError::NotSeller
+        );
+        listing.set_inner(Listing {
+            call: call.key(),
+            seller: holder,
+            price,
+            listed_slot: clock.slot,
+            bump: ctx.bumps.listing,
+        });
+        emit_cpi!(Listed {
+            call: call.key(),
+            id: call.id,
+            seller: holder,
+            price,
+            slot: clock.slot
+        });
+        Ok(())
+    }
+
+    pub fn unlist(ctx: Context<Unlist>) -> Result<()> {
+        emit_cpi!(Unlisted {
+            call: ctx.accounts.listing.call,
+            seller: ctx.accounts.seller.key(),
+            slot: Clock::get()?.slot
+        });
+        Ok(())
+    }
+
+    pub fn buy_listed(ctx: Context<BuyListed>, price: u64) -> Result<()> {
+        let clock = Clock::get()?;
+        let call = &mut ctx.accounts.call;
+        require!(clock.unix_timestamp < call.expiry_ts, OnceError::Expired);
+        require!(clock.slot >= gate_end(call, &ctx.accounts.config), OnceError::InGate);
+        require_eq!(ctx.accounts.listing.price, price, OnceError::PriceChanged);
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.payment_source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            price,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        let seller = ctx.accounts.listing.seller;
+        call.holder = Some(ctx.accounts.buyer.key());
+        call.bought_slot = clock.slot;
+        emit_cpi!(Resold {
+            call: call.key(),
+            id: call.id,
+            seller,
+            buyer: ctx.accounts.buyer.key(),
+            price,
+            slot: clock.slot,
+            locked: 0
+        });
+        Ok(())
+    }
+
+    pub fn lock_and_buy_listed(ctx: Context<LockAndBuyListed>, price: u64) -> Result<()> {
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.config;
+        let call = &mut ctx.accounts.call;
+        require!(clock.unix_timestamp < call.expiry_ts, OnceError::Expired);
+        require!(config.once_mint.is_some(), OnceError::OnceNotSet);
+        let end = gate_end(call, config);
+        require!(clock.slot < end, OnceError::GateClosed);
+        require_eq!(ctx.accounts.listing.price, price, OnceError::PriceChanged);
+        let amount = config.lock_amount;
+        // A wallet that buys the same call again inside the gate adds a fresh lock_amount to its resale lock.
+        let held = ctx.accounts.lock_vault.amount;
+        let total = held.checked_add(amount).ok_or(OnceError::Overflow)?;
+        transfer(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.once_source.to_account_info(),
+            ctx.accounts.once_mint.to_account_info(),
+            ctx.accounts.lock_vault.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            amount,
+            ctx.accounts.once_mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.lock_vault.reload()?;
+        require_eq!(ctx.accounts.lock_vault.amount, total, OnceError::DepositMismatch);
+        let lock = &mut ctx.accounts.lock;
+        if lock.locker == Pubkey::default() {
+            lock.set_inner(ResaleLock {
+                locker: ctx.accounts.buyer.key(),
+                call: call.key(),
+                amount,
+                release_slot: end,
+                bump: ctx.bumps.lock,
+            });
+        } else {
+            require_keys_eq!(lock.locker, ctx.accounts.buyer.key(), OnceError::NotLocker);
+            require_eq!(lock.release_slot, end, OnceError::InvalidValue);
+            lock.amount = lock.amount.checked_add(amount).ok_or(OnceError::Overflow)?;
+        }
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.payment_source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            price,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        let seller = ctx.accounts.listing.seller;
+        call.holder = Some(ctx.accounts.buyer.key());
+        call.bought_slot = clock.slot;
+        emit_cpi!(Resold {
+            call: call.key(),
+            id: call.id,
+            seller,
+            buyer: ctx.accounts.buyer.key(),
+            price,
+            slot: clock.slot,
+            locked: amount
+        });
+        Ok(())
+    }
+
+    pub fn return_resale_lock(ctx: Context<ReturnResaleLock>) -> Result<()> {
+        let clock = Clock::get()?;
+        let lock = &ctx.accounts.lock;
+        require!(clock.slot >= lock.release_slot, OnceError::LockNotReleased);
+        let returned = ctx.accounts.lock_vault.amount;
+        let seeds: &[&[u8]] = &[b"resale_lock", lock.call.as_ref(), lock.locker.as_ref(), &[lock.bump]];
+        transfer(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.lock_vault.to_account_info(),
+            ctx.accounts.once_mint.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+            lock.to_account_info(),
+            returned,
+            ctx.accounts.once_mint.decimals,
+            &[seeds],
+        )?;
+        close(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.lock_vault.to_account_info(),
+            ctx.accounts.locker.to_account_info(),
+            lock.to_account_info(),
+            &[seeds],
+        )?;
+        emit_cpi!(ResaleLockReturned {
+            call: lock.call,
+            locker: lock.locker,
+            returned,
+            slot: clock.slot
+        });
+        Ok(())
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

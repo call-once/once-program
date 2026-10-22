@@ -73,3 +73,34 @@ pub struct LockReturned {
     pub returned: u64,
     pub slot: u64,
 }
+#[event]
+pub struct Listed {
+    pub call: Pubkey,
+    pub id: u64,
+    pub seller: Pubkey,
+    pub price: u64,
+    pub slot: u64,
+}
+#[event]
+pub struct Unlisted {
+    pub call: Pubkey,
+    pub seller: Pubkey,
+    pub slot: u64,
+}
+#[event]
+pub struct Resold {
+    pub call: Pubkey,
+    pub id: u64,
+    pub seller: Pubkey,
+    pub buyer: Pubkey,
+    pub price: u64,
+    pub slot: u64,
+    pub locked: u64,
+}
+#[event]
+pub struct ResaleLockReturned {
+    pub call: Pubkey,
+    pub locker: Pubkey,
+    pub returned: u64,
+    pub slot: u64,
+}

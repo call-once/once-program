@@ -36,59 +36,88 @@ import {
 import {
   getCallAccountCodec,
   getConfigCodec,
+  getListingCodec,
   getLockCodec,
+  getResaleLockCodec,
   type CallAccount,
   type CallAccountArgs,
   type Config,
   type ConfigArgs,
+  type Listing,
+  type ListingArgs,
   type Lock,
   type LockArgs,
+  type ResaleLock,
+  type ResaleLockArgs,
 } from "../accounts/index.js";
 import {
   getBuyInstructionAsync,
+  getBuyListedInstructionAsync,
   getCallInstructionAsync,
   getCancelInstructionAsync,
   getInitInstructionAsync,
+  getListInstructionAsync,
   getLockAndBuyInstructionAsync,
+  getLockAndBuyListedInstructionAsync,
   getReclaimInstructionAsync,
   getReturnLockInstructionAsync,
+  getReturnResaleLockInstructionAsync,
   getSetOnceInstructionAsync,
   getSetParamsInstructionAsync,
+  getUnlistInstruction,
   getWriteInstructionAsync,
   parseBuyInstruction,
+  parseBuyListedInstruction,
   parseCallInstruction,
   parseCancelInstruction,
   parseInitInstruction,
+  parseListInstruction,
   parseLockAndBuyInstruction,
+  parseLockAndBuyListedInstruction,
   parseReclaimInstruction,
   parseReturnLockInstruction,
+  parseReturnResaleLockInstruction,
   parseSetOnceInstruction,
   parseSetParamsInstruction,
+  parseUnlistInstruction,
   parseWriteInstruction,
   type BuyAsyncInput,
+  type BuyListedAsyncInput,
   type CallAsyncInput,
   type CancelAsyncInput,
   type InitAsyncInput,
+  type ListAsyncInput,
   type LockAndBuyAsyncInput,
+  type LockAndBuyListedAsyncInput,
   type ParsedBuyInstruction,
+  type ParsedBuyListedInstruction,
   type ParsedCallInstruction,
   type ParsedCancelInstruction,
   type ParsedInitInstruction,
+  type ParsedListInstruction,
   type ParsedLockAndBuyInstruction,
+  type ParsedLockAndBuyListedInstruction,
   type ParsedReclaimInstruction,
   type ParsedReturnLockInstruction,
+  type ParsedReturnResaleLockInstruction,
   type ParsedSetOnceInstruction,
   type ParsedSetParamsInstruction,
+  type ParsedUnlistInstruction,
   type ParsedWriteInstruction,
   type ReclaimAsyncInput,
   type ReturnLockAsyncInput,
+  type ReturnResaleLockAsyncInput,
   type SetOnceAsyncInput,
   type SetParamsAsyncInput,
+  type UnlistInput,
   type WriteAsyncInput,
 } from "../instructions/index.js";
 import {
   findCallAccountPda,
   findConfigPda,
+  findListingPda,
+  findLockPda,
+  findLockVaultPda,
   findVaultPda,
 } from "../pdas/index.js";
 
@@ -98,7 +127,9 @@ export const ONCE_PROGRAM_ADDRESS =
 export enum OnceAccount {
   CallAccount,
   Config,
+  Listing,
   Lock,
+  ResaleLock,
 }
 
 export function identifyOnceAccount(
@@ -131,12 +162,34 @@ export function identifyOnceAccount(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([218, 32, 50, 73, 43, 134, 26, 58]),
+      ),
+      0,
+    )
+  ) {
+    return OnceAccount.Listing;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([8, 255, 36, 202, 210, 22, 57, 137]),
       ),
       0,
     )
   ) {
     return OnceAccount.Lock;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([255, 254, 200, 152, 21, 158, 80, 41]),
+      ),
+      0,
+    )
+  ) {
+    return OnceAccount.ResaleLock;
   }
   throw new SolanaError(
     SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_ACCOUNT,
@@ -149,10 +202,14 @@ export enum OnceEvent {
   Cancelled,
   Exercised,
   Initialized,
+  Listed,
   LockReturned,
   OnceSet,
   ParamsSet,
   Reclaimed,
+  ResaleLockReturned,
+  Resold,
+  Unlisted,
   Written,
 }
 
@@ -208,6 +265,17 @@ export function identifyOnceEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([243, 173, 136, 195, 125, 241, 12, 99]),
+      ),
+      0,
+    )
+  ) {
+    return OnceEvent.Listed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([26, 31, 88, 42, 226, 20, 3, 84]),
       ),
       0,
@@ -252,6 +320,39 @@ export function identifyOnceEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([7, 59, 218, 177, 99, 184, 95, 186]),
+      ),
+      0,
+    )
+  ) {
+    return OnceEvent.ResaleLockReturned;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([0, 107, 237, 161, 251, 73, 29, 253]),
+      ),
+      0,
+    )
+  ) {
+    return OnceEvent.Resold;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([200, 255, 248, 52, 219, 183, 40, 213]),
+      ),
+      0,
+    )
+  ) {
+    return OnceEvent.Unlisted;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([251, 147, 220, 80, 245, 133, 189, 96]),
       ),
       0,
@@ -266,14 +367,19 @@ export function identifyOnceEvent(
 
 export enum OnceInstruction {
   Buy,
+  BuyListed,
   Call,
   Cancel,
   Init,
+  List,
   LockAndBuy,
+  LockAndBuyListed,
   Reclaim,
   ReturnLock,
+  ReturnResaleLock,
   SetOnce,
   SetParams,
+  Unlist,
   Write,
 }
 
@@ -291,6 +397,17 @@ export function identifyOnceInstruction(
     )
   ) {
     return OnceInstruction.Buy;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([75, 236, 50, 95, 167, 79, 50, 201]),
+      ),
+      0,
+    )
+  ) {
+    return OnceInstruction.BuyListed;
   }
   if (
     containsBytes(
@@ -329,12 +446,34 @@ export function identifyOnceInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([54, 174, 193, 67, 17, 41, 132, 38]),
+      ),
+      0,
+    )
+  ) {
+    return OnceInstruction.List;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([225, 174, 12, 121, 163, 153, 151, 202]),
       ),
       0,
     )
   ) {
     return OnceInstruction.LockAndBuy;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([75, 31, 15, 40, 173, 74, 213, 233]),
+      ),
+      0,
+    )
+  ) {
+    return OnceInstruction.LockAndBuyListed;
   }
   if (
     containsBytes(
@@ -362,6 +501,17 @@ export function identifyOnceInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([35, 48, 20, 74, 78, 110, 70, 235]),
+      ),
+      0,
+    )
+  ) {
+    return OnceInstruction.ReturnResaleLock;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([208, 21, 99, 197, 250, 126, 51, 151]),
       ),
       0,
@@ -379,6 +529,17 @@ export function identifyOnceInstruction(
     )
   ) {
     return OnceInstruction.SetParams;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([185, 125, 20, 193, 209, 44, 13, 224]),
+      ),
+      0,
+    )
+  ) {
+    return OnceInstruction.Unlist;
   }
   if (
     containsBytes(
@@ -402,6 +563,9 @@ export type ParsedOnceInstruction<
 > =
   | ({ instructionType: OnceInstruction.Buy } & ParsedBuyInstruction<TProgram>)
   | ({
+      instructionType: OnceInstruction.BuyListed;
+    } & ParsedBuyListedInstruction<TProgram>)
+  | ({
       instructionType: OnceInstruction.Call;
     } & ParsedCallInstruction<TProgram>)
   | ({
@@ -411,8 +575,14 @@ export type ParsedOnceInstruction<
       instructionType: OnceInstruction.Init;
     } & ParsedInitInstruction<TProgram>)
   | ({
+      instructionType: OnceInstruction.List;
+    } & ParsedListInstruction<TProgram>)
+  | ({
       instructionType: OnceInstruction.LockAndBuy;
     } & ParsedLockAndBuyInstruction<TProgram>)
+  | ({
+      instructionType: OnceInstruction.LockAndBuyListed;
+    } & ParsedLockAndBuyListedInstruction<TProgram>)
   | ({
       instructionType: OnceInstruction.Reclaim;
     } & ParsedReclaimInstruction<TProgram>)
@@ -420,11 +590,17 @@ export type ParsedOnceInstruction<
       instructionType: OnceInstruction.ReturnLock;
     } & ParsedReturnLockInstruction<TProgram>)
   | ({
+      instructionType: OnceInstruction.ReturnResaleLock;
+    } & ParsedReturnResaleLockInstruction<TProgram>)
+  | ({
       instructionType: OnceInstruction.SetOnce;
     } & ParsedSetOnceInstruction<TProgram>)
   | ({
       instructionType: OnceInstruction.SetParams;
     } & ParsedSetParamsInstruction<TProgram>)
+  | ({
+      instructionType: OnceInstruction.Unlist;
+    } & ParsedUnlistInstruction<TProgram>)
   | ({
       instructionType: OnceInstruction.Write;
     } & ParsedWriteInstruction<TProgram>);
@@ -439,6 +615,13 @@ export function parseOnceInstruction<TProgram extends string>(
       return {
         instructionType: OnceInstruction.Buy,
         ...parseBuyInstruction(instruction),
+      };
+    }
+    case OnceInstruction.BuyListed: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OnceInstruction.BuyListed,
+        ...parseBuyListedInstruction(instruction),
       };
     }
     case OnceInstruction.Call: {
@@ -462,11 +645,25 @@ export function parseOnceInstruction<TProgram extends string>(
         ...parseInitInstruction(instruction),
       };
     }
+    case OnceInstruction.List: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OnceInstruction.List,
+        ...parseListInstruction(instruction),
+      };
+    }
     case OnceInstruction.LockAndBuy: {
       assertIsInstructionWithAccounts(instruction);
       return {
         instructionType: OnceInstruction.LockAndBuy,
         ...parseLockAndBuyInstruction(instruction),
+      };
+    }
+    case OnceInstruction.LockAndBuyListed: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OnceInstruction.LockAndBuyListed,
+        ...parseLockAndBuyListedInstruction(instruction),
       };
     }
     case OnceInstruction.Reclaim: {
@@ -483,6 +680,13 @@ export function parseOnceInstruction<TProgram extends string>(
         ...parseReturnLockInstruction(instruction),
       };
     }
+    case OnceInstruction.ReturnResaleLock: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OnceInstruction.ReturnResaleLock,
+        ...parseReturnResaleLockInstruction(instruction),
+      };
+    }
     case OnceInstruction.SetOnce: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -495,6 +699,13 @@ export function parseOnceInstruction<TProgram extends string>(
       return {
         instructionType: OnceInstruction.SetParams,
         ...parseSetParamsInstruction(instruction),
+      };
+    }
+    case OnceInstruction.Unlist: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OnceInstruction.Unlist,
+        ...parseUnlistInstruction(instruction),
       };
     }
     case OnceInstruction.Write: {
@@ -526,13 +737,21 @@ export type OncePluginAccounts = {
     SelfFetchFunctions<CallAccountArgs, CallAccount>;
   config: ReturnType<typeof getConfigCodec> &
     SelfFetchFunctions<ConfigArgs, Config>;
+  listing: ReturnType<typeof getListingCodec> &
+    SelfFetchFunctions<ListingArgs, Listing>;
   lock: ReturnType<typeof getLockCodec> & SelfFetchFunctions<LockArgs, Lock>;
+  resaleLock: ReturnType<typeof getResaleLockCodec> &
+    SelfFetchFunctions<ResaleLockArgs, ResaleLock>;
 };
 
 export type OncePluginInstructions = {
   buy: (
     input: BuyAsyncInput,
   ) => ReturnType<typeof getBuyInstructionAsync> & SelfPlanAndSendFunctions;
+  buyListed: (
+    input: BuyListedAsyncInput,
+  ) => ReturnType<typeof getBuyListedInstructionAsync> &
+    SelfPlanAndSendFunctions;
   call: (
     input: CallAsyncInput,
   ) => ReturnType<typeof getCallInstructionAsync> & SelfPlanAndSendFunctions;
@@ -542,9 +761,16 @@ export type OncePluginInstructions = {
   init: (
     input: InitAsyncInput,
   ) => ReturnType<typeof getInitInstructionAsync> & SelfPlanAndSendFunctions;
+  list: (
+    input: ListAsyncInput,
+  ) => ReturnType<typeof getListInstructionAsync> & SelfPlanAndSendFunctions;
   lockAndBuy: (
     input: LockAndBuyAsyncInput,
   ) => ReturnType<typeof getLockAndBuyInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  lockAndBuyListed: (
+    input: LockAndBuyListedAsyncInput,
+  ) => ReturnType<typeof getLockAndBuyListedInstructionAsync> &
     SelfPlanAndSendFunctions;
   reclaim: (
     input: ReclaimAsyncInput,
@@ -553,6 +779,10 @@ export type OncePluginInstructions = {
     input: ReturnLockAsyncInput,
   ) => ReturnType<typeof getReturnLockInstructionAsync> &
     SelfPlanAndSendFunctions;
+  returnResaleLock: (
+    input: ReturnResaleLockAsyncInput,
+  ) => ReturnType<typeof getReturnResaleLockInstructionAsync> &
+    SelfPlanAndSendFunctions;
   setOnce: (
     input: SetOnceAsyncInput,
   ) => ReturnType<typeof getSetOnceInstructionAsync> & SelfPlanAndSendFunctions;
@@ -560,6 +790,9 @@ export type OncePluginInstructions = {
     input: SetParamsAsyncInput,
   ) => ReturnType<typeof getSetParamsInstructionAsync> &
     SelfPlanAndSendFunctions;
+  unlist: (
+    input: UnlistInput,
+  ) => ReturnType<typeof getUnlistInstruction> & SelfPlanAndSendFunctions;
   write: (
     input: WriteAsyncInput,
   ) => ReturnType<typeof getWriteInstructionAsync> & SelfPlanAndSendFunctions;
@@ -568,6 +801,9 @@ export type OncePluginInstructions = {
 export type OncePluginPdas = {
   config: typeof findConfigPda;
   vault: typeof findVaultPda;
+  listing: typeof findListingPda;
+  lock: typeof findLockPda;
+  lockVault: typeof findLockVaultPda;
   callAccount: typeof findCallAccountPda;
 };
 
@@ -586,11 +822,18 @@ export function onceProgram() {
         accounts: {
           callAccount: addSelfFetchFunctions(client, getCallAccountCodec()),
           config: addSelfFetchFunctions(client, getConfigCodec()),
+          listing: addSelfFetchFunctions(client, getListingCodec()),
           lock: addSelfFetchFunctions(client, getLockCodec()),
+          resaleLock: addSelfFetchFunctions(client, getResaleLockCodec()),
         },
         instructions: {
           buy: (input) =>
             addSelfPlanAndSendFunctions(client, getBuyInstructionAsync(input)),
+          buyListed: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getBuyListedInstructionAsync(input),
+            ),
           call: (input) =>
             addSelfPlanAndSendFunctions(client, getCallInstructionAsync(input)),
           cancel: (input) =>
@@ -600,10 +843,17 @@ export function onceProgram() {
             ),
           init: (input) =>
             addSelfPlanAndSendFunctions(client, getInitInstructionAsync(input)),
+          list: (input) =>
+            addSelfPlanAndSendFunctions(client, getListInstructionAsync(input)),
           lockAndBuy: (input) =>
             addSelfPlanAndSendFunctions(
               client,
               getLockAndBuyInstructionAsync(input),
+            ),
+          lockAndBuyListed: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getLockAndBuyListedInstructionAsync(input),
             ),
           reclaim: (input) =>
             addSelfPlanAndSendFunctions(
@@ -615,6 +865,11 @@ export function onceProgram() {
               client,
               getReturnLockInstructionAsync(input),
             ),
+          returnResaleLock: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getReturnResaleLockInstructionAsync(input),
+            ),
           setOnce: (input) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -625,6 +880,8 @@ export function onceProgram() {
               client,
               getSetParamsInstructionAsync(input),
             ),
+          unlist: (input) =>
+            addSelfPlanAndSendFunctions(client, getUnlistInstruction(input)),
           write: (input) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -634,6 +891,9 @@ export function onceProgram() {
         pdas: {
           config: findConfigPda,
           vault: findVaultPda,
+          listing: findListingPda,
+          lock: findLockPda,
+          lockVault: findLockVaultPda,
           callAccount: findCallAccountPda,
         },
         identifyAccount: identifyOnceAccount,

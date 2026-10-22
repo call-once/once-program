@@ -17,7 +17,7 @@ export type ExerciseRpc = {
 type Input = Omit<Parameters<typeof getCallInstruction>[0], 'paymentDestination'> & {
   writer: Address; usdcMint: Address; usdcTokenProgram: Address; holder: TransactionSigner;
 };
-export type WriterPaymentInput = { writer: Address; usdcMint: Address; usdcTokenProgram: Address; payer: TransactionSigner };
+export type WriterPaymentInput = { writer: Address; usdcMint: Address; usdcTokenProgram: Address; payer: TransactionSigner; avoid?: Address };
 
 /** The writer's USDC account to pay into, recovering a closed or reassigned ATA in the same transaction. */
 export async function writerPaymentDestination(input: WriterPaymentInput, rpc: ExerciseRpc): Promise<{
@@ -26,10 +26,10 @@ export async function writerPaymentDestination(input: WriterPaymentInput, rpc: E
   const { writer, usdcMint: mint, usdcTokenProgram: program, payer } = input;
   const canonical = (await findAssociatedTokenPda({ owner: writer, mint, tokenProgram: program }))[0];
   const account = await rpc.getAccount(canonical);
-  if (account === null) {
+  if (account === null && input.avoid !== canonical) {
     return { instructions: [await getCreateAssociatedTokenIdempotentInstructionAsync({ payer, owner: writer, mint, tokenProgram: program })], destination: canonical };
   }
-  if (account.programAddress !== program || tokenAccountOwner(account.data) !== writer ||
+  if (input.avoid === canonical || account === null || account.programAddress !== program || tokenAccountOwner(account.data) !== writer ||
       getAddressDecoder().decode(account.data.subarray(0, 32)) !== mint) {
     const fresh = await generateKeyPairSigner();
     // USDC uses an unextended token account; account creation and payment are atomic.
@@ -46,7 +46,9 @@ export async function buildExerciseInstructions(input: Input, rpc: ExerciseRpc, 
   instructions: Instruction[]; paymentDestination: Address;
 }> {
   const { writer, usdcMint, usdcTokenProgram, holder } = input;
-  const payment = await writerPaymentDestination({ writer, usdcMint, usdcTokenProgram, payer: holder }, rpc);
+  const source = input.paymentSource;
+  const sourceAddress = typeof source === 'string' ? source : source && 'address' in source ? source.address : source?.[0];
+  const payment = await writerPaymentDestination({ writer, usdcMint, usdcTokenProgram, payer: holder, avoid: holder.address === writer ? sourceAddress : undefined }, rpc);
   const instructions = [...payment.instructions,
     getCallInstruction({ ...input, paymentDestination: payment.destination }, programAddress ? { programAddress } : undefined)];
   return { instructions, paymentDestination: payment.destination };

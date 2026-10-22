@@ -15,7 +15,7 @@ import { getCreateAccountInstruction } from '@solana-program/system';
 import * as once from '../client/src/generated/index.js';
 import { TOKEN, TOKEN_2022, ATA_PROGRAM, LOADER, USDC, XSTOCKS } from '../client/constants.js';
 import { decodeEvents } from '../client/events.js';
-import { findConfigPda, findCallPda, findVaultPda, findLockPda, findLockVaultPda } from '../client/pdas.js';
+import { findConfigPda, findCallPda, findVaultPda, findLockPda, findLockVaultPda, findListingPda, findResaleLockPda, findResaleLockVaultPda } from '../client/pdas.js';
 
 export const PROGRAM = once.ONCE_PROGRAM_ADDRESS;
 export const LOT = 1_000_000n, STRIKE = 2_000_000n, PREMIUM = 100_000n;
@@ -197,6 +197,7 @@ export class Harness {
         if (after.exists && prior.exists) {
           expect(Buffer.from(after.data), `${label}: data ${key}`).toEqual(Buffer.from(prior.data));
           if (key !== payer.address) expect(after.lamports, `${label}: rent ${key}`).toEqual(prior.lamports);
+          else expect(prior.lamports - after.lamports, `${label}: fee only`).toBe(5000n * BigInt(Object.keys(tx.signatures).length));
         }
       });
       expect(this.totals()).toEqual(totals);
@@ -225,12 +226,33 @@ export class Harness {
           expect(event.data).toEqual({ onceMint: unwrapOption(this.configState().onceMint), onceTokenProgram: unwrapOption(this.configState().onceTokenProgram) });
         } else if (event.name === 'ParamsSet') {
           expect(event.data).toEqual({ gateSlots: this.configState().gateSlots, lockAmount: this.configState().lockAmount });
-        } else if (event.name === 'LockReturned') {
-          const lockAddress = (await findLockPda(event.data.call))[0];
-          const vaultAddress = (await findLockVaultPda(event.data.call))[0];
+        } else if (event.name === 'Listed') {
+          const at = (await findListingPda(event.data.call))[0], listing = once.getListingDecoder().decode(accountData(this.svm, at));
+          expect(event.data).toEqual({ call: listing.call, id: once.getCallAccountDecoder().decode(accountData(this.svm, listing.call)).id,
+            seller: listing.seller, price: listing.price, slot: listing.listedSlot });
+        } else if (event.name === 'Unlisted') {
+          const at = (await findListingPda(event.data.call))[0], before = priorByKey.get(at);
+          if (!before?.exists) throw new Error('Missing pre-unlist account');
+          const listing = once.getListingDecoder().decode(before.data);
+          expect(event.data).toEqual({ call: listing.call, seller: listing.seller, slot: this.svm.getClock().slot });
+          expect(this.svm.getAccount(at).exists).toBe(false);
+        } else if (event.name === 'Resold') {
+          const at = (await findListingPda(event.data.call))[0], before = priorByKey.get(at), priorCall = priorByKey.get(event.data.call);
+          if (!before?.exists || !priorCall?.exists) throw new Error('Missing pre-resale accounts');
+          const listing = once.getListingDecoder().decode(before.data), call = once.getCallAccountDecoder().decode(accountData(this.svm, event.data.call));
+          const old = once.getCallAccountDecoder().decode(priorCall.data);
+          expect(accountData(this.svm, event.data.call)).toEqual(Buffer.from(once.getCallAccountEncoder().encode({ ...old, holder: call.holder, boughtSlot: this.svm.getClock().slot })));
+          expect(event.data).toEqual({ call: listing.call, id: call.id, seller: listing.seller, buyer: unwrapOption(call.holder),
+            price: listing.price, slot: call.boughtSlot, locked: ixs.some(ix => ix.programAddress === PROGRAM && once.LOCK_AND_BUY_LISTED_DISCRIMINATOR.every((v,i) => ix.data?.[i] === v)) ? this.configState().lockAmount : 0n });
+          expect(old.holder).toEqual({ __option: 'Some', value: listing.seller });
+          expect(this.svm.getAccount(at).exists).toBe(false);
+        } else if (event.name === 'LockReturned' || event.name === 'ResaleLockReturned') {
+          const resale = event.name === 'ResaleLockReturned';
+          const lockAddress = (await (resale ? findResaleLockPda(event.data.call, event.data.locker) : findLockPda(event.data.call)))[0];
+          const vaultAddress = (await (resale ? findResaleLockVaultPda(event.data.call, event.data.locker) : findLockVaultPda(event.data.call)))[0];
           const prior = priorByKey.get(lockAddress), vault = priorByKey.get(vaultAddress);
           if (!prior?.exists || !vault?.exists) throw new Error('Missing pre-return accounts');
-          const lock = once.getLockDecoder().decode(prior.data);
+          const lock = (resale ? once.getResaleLockDecoder() : once.getLockDecoder()).decode(prior.data);
           expect(event.data).toEqual({ call: lock.call, locker: lock.locker,
             returned: Buffer.from(vault.data).readBigUInt64LE(64), slot: this.svm.getClock().slot });
           expect(this.svm.getAccount(lockAddress).exists).toBe(false);

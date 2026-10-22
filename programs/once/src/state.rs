@@ -60,3 +60,23 @@ pub struct Lock {
     pub release_slot: u64,
     pub bump: u8,
 }
+
+#[account]
+#[derive(InitSpace)]
+pub struct Listing {
+    pub call: Pubkey,
+    pub seller: Pubkey,
+    pub price: u64,
+    pub listed_slot: u64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct ResaleLock {
+    pub locker: Pubkey,
+    pub call: Pubkey,
+    pub amount: u64,
+    pub release_slot: u64,
+    pub bump: u8,
+}

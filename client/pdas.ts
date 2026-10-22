@@ -9,3 +9,13 @@ export const findLockPda = (call: Address) => getProgramDerivedAddress({
 export const findLockVaultPda = (call: Address) => getProgramDerivedAddress({
   programAddress: ONCE_PROGRAM_ADDRESS, seeds: ['lock_vault', getAddressEncoder().encode(call)],
 });
+
+export const findListingPda = (call: Address) => getProgramDerivedAddress({
+  programAddress: ONCE_PROGRAM_ADDRESS, seeds: ['listing', getAddressEncoder().encode(call)],
+});
+export const findResaleLockPda = (call: Address, locker: Address) => getProgramDerivedAddress({
+  programAddress: ONCE_PROGRAM_ADDRESS, seeds: ['resale_lock', getAddressEncoder().encode(call), getAddressEncoder().encode(locker)],
+});
+export const findResaleLockVaultPda = (call: Address, locker: Address) => getProgramDerivedAddress({
+  programAddress: ONCE_PROGRAM_ADDRESS, seeds: ['resale_lock_vault', getAddressEncoder().encode(call), getAddressEncoder().encode(locker)],
+});

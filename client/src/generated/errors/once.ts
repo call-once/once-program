@@ -66,6 +66,10 @@ export const ONCE_ERROR__VAULT_SHORT = 0x1787; // 6023
 export const ONCE_ERROR__WRONG_MINT = 0x1788; // 6024
 /** Overflow: Checked arithmetic overflow */
 export const ONCE_ERROR__OVERFLOW = 0x1789; // 6025
+/** NotSeller: Signer is not the seller */
+export const ONCE_ERROR__NOT_SELLER = 0x178a; // 6026
+/** PriceChanged: Listing price differs from the price agreed */
+export const ONCE_ERROR__PRICE_CHANGED = 0x178b; // 6027
 
 export type OnceError =
   | typeof ONCE_ERROR__ALREADY_SETTLED
@@ -84,11 +88,13 @@ export type OnceError =
   | typeof ONCE_ERROR__NOT_HOLDER
   | typeof ONCE_ERROR__NOT_LOCKER
   | typeof ONCE_ERROR__NOT_OPEN
+  | typeof ONCE_ERROR__NOT_SELLER
   | typeof ONCE_ERROR__NOT_UPGRADE_AUTHORITY
   | typeof ONCE_ERROR__NOT_WRITER
   | typeof ONCE_ERROR__Once_ALREADY_SET
   | typeof ONCE_ERROR__Once_NOT_SET
   | typeof ONCE_ERROR__OVERFLOW
+  | typeof ONCE_ERROR__PRICE_CHANGED
   | typeof ONCE_ERROR__TRANSFER_FEE_MINT
   | typeof ONCE_ERROR__TRANSFER_HOOK_ACTIVE
   | typeof ONCE_ERROR__UNSUPPORTED_TOKEN_PROGRAM
@@ -114,11 +120,13 @@ if (process.env["NODE_ENV"] !== "production") {
     [ONCE_ERROR__NOT_HOLDER]: `Signer is not the holder`,
     [ONCE_ERROR__NOT_LOCKER]: `Signer is not the locker`,
     [ONCE_ERROR__NOT_OPEN]: `Call is not open`,
+    [ONCE_ERROR__NOT_SELLER]: `Signer is not the seller`,
     [ONCE_ERROR__NOT_UPGRADE_AUTHORITY]: `Only the program upgrade authority may initialize`,
     [ONCE_ERROR__NOT_WRITER]: `Signer is not the writer`,
     [ONCE_ERROR__Once_ALREADY_SET]: `ONCE mint has already been set`,
     [ONCE_ERROR__Once_NOT_SET]: `ONCE mint has not been set`,
     [ONCE_ERROR__OVERFLOW]: `Checked arithmetic overflow`,
+    [ONCE_ERROR__PRICE_CHANGED]: `Listing price differs from the price agreed`,
     [ONCE_ERROR__TRANSFER_FEE_MINT]: `Transfer fee mints are not supported`,
     [ONCE_ERROR__TRANSFER_HOOK_ACTIVE]: `An active transfer hook is not supported`,
     [ONCE_ERROR__UNSUPPORTED_TOKEN_PROGRAM]: `Unsupported token program`,

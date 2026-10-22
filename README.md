@@ -6,7 +6,7 @@ A Solana program in which a call option holds the tokenized stock it promises. T
 
 Program `GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa` on Solana mainnet.
 
-callonce.xyz is the specification: it draws the device and states six claims. This repository is the device. Each claim below names the code that holds it and the test that checks it, and the program on mainnet is the deterministic build of this code. A claim can be checked here instead of taken from the page.
+callonce.xyz is the specification: it draws the device and states seven claims. This repository is the device. Each claim below names the code that holds it and the test that checks it, and the program on mainnet is the deterministic build of this code. A claim can be checked here instead of taken from the page.
 
 ## Claims
 
@@ -48,6 +48,10 @@ Held by `validate_mint` in `programs/once/src/mint.rs`, which `write` calls. A T
 
 Checked by `P7 mint rejection matches client inspection; classic mint is accepted` and `P7 all 12 mainnet mint layouts: exercise, cancellation, expiry reclaim`.
 
+**7. The call of claim 1, passed by its holder to another wallet at a price the holder names, the stock staying in it; within the slots of claim 5, only to a wallet that locks ONCE.**
+
+Held by `list`, `buy_listed` and `lock_and_buy_listed`; checked by `tests/resale.test.ts`.
+
 ## Parts
 
 The numbers are the reference numerals in the drawings on callonce.xyz.
@@ -59,8 +63,8 @@ The numbers are the reference numerals in the drawings on callonce.xyz.
 | (16) | strike | `Call.strike`, a total in raw USDC units for the whole lot |
 | (18) | pin | `Call.state`: `Open` or `Held` while the stock is inside, `Exercised`, `Reclaimed` or `Cancelled` once it has left. No instruction sets it back |
 | (24) | gate | `Call.gate_until`, or `Config.gate_floor` for a call written before ONCE was set |
-| (28) | lock | `Lock` account at `["lock", call]` and its token account at `["lock_vault", call]` |
-| (30) | holder's mark | `Call.holder` |
+| (28) | lock | `Lock` account at `["lock", call]` and its token account at `["lock_vault", call]`; a purchase from a holder inside the gate locks into a `ResaleLock` at `["resale_lock", call, buyer]` and its token account at `["resale_lock_vault", call, buyer]`, one per wallet and call, adding `lock_amount` on each such purchase |
+| (30) | holder's mark | `Call.holder`; a price the holder names sits in a `Listing` account at `["listing", call]` |
 | (32) | ONCE | the mint in `Config.once_mint`; the config account is at `["config"]` |
 
 ## Instructions
@@ -74,6 +78,11 @@ The numbers are the reference numerals in the drawings on callonce.xyz.
 | `cancel` | writer | open | Returns the lot to the writer; the vault closes |
 | `reclaim` | writer | open or held, at or after expiry | Returns the lot to the writer; the vault closes |
 | `return_lock` | locker | from the lock's `release_slot` | Returns all of the locked ONCE to the locker; the lock closes |
+| `list` | holder | held, before expiry, positive price | Offers the call or changes its price; the holder pays listing rent |
+| `unlist` | seller | signer owns the listing, including after settlement | Takes the offer down and returns listing rent |
+| `buy_listed` | buyer | held, before expiry, gate open, signed price matches | Pays the holder that price, passes the call to the buyer and returns listing rent to the seller; the stock stays in its vault |
+| `lock_and_buy_listed` | buyer | held, before expiry, gate shut, signed price matches | Adds a fresh `lock_amount` to the buyer's resale lock, then buys as above |
+| `return_resale_lock` | locker | from the lock's `release_slot` | Returns the entire resale vault balance and closes both lock accounts to the locker |
 | `init`, `set_once`, `set_params` | upgrade authority, admin | | Configuration. None of them can move the stock in a vault or the ONCE in a lock |
 
 Expiry is checked against the chain clock (`Clock::unix_timestamp`). The gate is counted in slots.

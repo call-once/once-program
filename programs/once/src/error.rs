@@ -54,4 +54,8 @@ pub enum OnceError {
     WrongMint,
     #[msg("Checked arithmetic overflow")]
     Overflow,
+    #[msg("Signer is not the seller")]
+    NotSeller,
+    #[msg("Listing price differs from the price agreed")]
+    PriceChanged,
 }

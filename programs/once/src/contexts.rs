@@ -254,3 +254,117 @@ fn new_call_space(config: &Config, id: u64) -> Result<usize> {
     require_eq!(config.next_id, id, OnceError::IdMismatch);
     Ok(8 + Call::INIT_SPACE)
 }
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct List<'info> {
+    #[account(mut)]
+    pub holder: Signer<'info>,
+    #[account(seeds = [b"call", &call.id.to_le_bytes()], bump = call.bump,
+        constraint = call.state == CallState::Held @ OnceError::NotHeld,
+        constraint = call.holder == Some(holder.key()) @ OnceError::NotHolder)]
+    pub call: Box<Account<'info, Call>>,
+    #[account(init_if_needed, payer = holder, space = 8 + Listing::INIT_SPACE,
+        seeds = [b"listing", call.key().as_ref()], bump)]
+    pub listing: Box<Account<'info, Listing>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct Unlist<'info> {
+    #[account(mut)]
+    pub seller: Signer<'info>,
+    #[account(mut, seeds = [b"listing", listing.call.as_ref()], bump = listing.bump,
+        has_one = seller @ OnceError::NotSeller, close = seller)]
+    pub listing: Box<Account<'info, Listing>>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct BuyListed<'info> {
+    pub buyer: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, seeds = [b"call", &call.id.to_le_bytes()], bump = call.bump,
+        constraint = call.state == CallState::Held @ OnceError::NotHeld)]
+    pub call: Box<Account<'info, Call>>,
+    #[account(mut, seeds = [b"listing", call.key().as_ref()], bump = listing.bump,
+        constraint = call.holder == Some(listing.seller) @ OnceError::NotHolder, close = seller)]
+    pub listing: Box<Account<'info, Listing>>,
+    /// CHECK: Receives only the listing rent; address is bound to the seller.
+    #[account(mut, address = listing.seller @ OnceError::NotSeller)]
+    pub seller: UncheckedAccount<'info>,
+    #[account(address = config.usdc_mint @ OnceError::WrongMint,
+        constraint = *usdc_mint.to_account_info().owner == usdc_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub usdc_token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = usdc_mint, token::authority = buyer, token::token_program = usdc_token_program)]
+    pub payment_source: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = usdc_mint, token::token_program = usdc_token_program,
+        constraint = payment_destination.owner == listing.seller @ OnceError::NotSeller)]
+    pub payment_destination: Box<InterfaceAccount<'info, TokenAccount>>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct LockAndBuyListed<'info> {
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, seeds = [b"call", &call.id.to_le_bytes()], bump = call.bump,
+        constraint = call.state == CallState::Held @ OnceError::NotHeld)]
+    pub call: Box<Account<'info, Call>>,
+    #[account(mut, seeds = [b"listing", call.key().as_ref()], bump = listing.bump,
+        constraint = call.holder == Some(listing.seller) @ OnceError::NotHolder, close = seller)]
+    pub listing: Box<Account<'info, Listing>>,
+    /// CHECK: Receives only the listing rent; address is bound to the seller.
+    #[account(mut, address = listing.seller @ OnceError::NotSeller)]
+    pub seller: UncheckedAccount<'info>,
+    #[account(init_if_needed, payer = buyer, space = 8 + ResaleLock::INIT_SPACE,
+        seeds = [b"resale_lock", call.key().as_ref(), buyer.key().as_ref()], bump)]
+    pub lock: Box<Account<'info, ResaleLock>>,
+    #[account(init_if_needed, payer = buyer, seeds = [b"resale_lock_vault", call.key().as_ref(), buyer.key().as_ref()], bump,
+        token::mint = once_mint, token::authority = lock, token::token_program = once_token_program)]
+    pub lock_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(constraint = Some(once_mint.key()) == config.once_mint @ OnceError::WrongMint,
+        constraint = *once_mint.to_account_info().owner == once_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub once_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(constraint = Some(once_token_program.key()) == config.once_token_program @ OnceError::UnsupportedTokenProgram)]
+    pub once_token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = once_mint, token::authority = buyer, token::token_program = once_token_program)]
+    pub once_source: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(address = config.usdc_mint @ OnceError::WrongMint,
+        constraint = *usdc_mint.to_account_info().owner == usdc_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub usdc_token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = usdc_mint, token::authority = buyer, token::token_program = usdc_token_program)]
+    pub payment_source: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = usdc_mint, token::token_program = usdc_token_program,
+        constraint = payment_destination.owner == listing.seller @ OnceError::NotSeller)]
+    pub payment_destination: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct ReturnResaleLock<'info> {
+    #[account(mut)]
+    pub locker: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, seeds = [b"resale_lock", lock.call.as_ref(), locker.key().as_ref()], bump = lock.bump,
+        has_one = locker @ OnceError::NotLocker, close = locker)]
+    pub lock: Box<Account<'info, ResaleLock>>,
+    #[account(mut, seeds = [b"resale_lock_vault", lock.call.as_ref(), locker.key().as_ref()], bump,
+        token::mint = once_mint, token::authority = lock, token::token_program = once_token_program)]
+    pub lock_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(constraint = Some(once_mint.key()) == config.once_mint @ OnceError::WrongMint,
+        constraint = *once_mint.to_account_info().owner == once_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub once_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(constraint = Some(once_token_program.key()) == config.once_token_program @ OnceError::UnsupportedTokenProgram)]
+    pub once_token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = once_mint, token::authority = locker, token::token_program = once_token_program)]
+    pub destination: Box<InterfaceAccount<'info, TokenAccount>>,
+}
