@@ -6,7 +6,7 @@ A Solana program in which a call option holds the tokenized stock it promises. T
 
 Program `GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa` on Solana mainnet.
 
-callonce.xyz is the specification: it draws the device and states nine claims. This repository is the device. Each claim below names the code that holds it and the test that checks it, and the program on mainnet is the deterministic build of this code. A claim can be checked here instead of taken from the page.
+callonce.xyz is the specification: it draws the device and states eleven claims. This repository is the device. Each claim below names the code that holds it and the test that checks it, and the program on mainnet is the deterministic build of this code. A claim can be checked here instead of taken from the page.
 
 ## Claims
 
@@ -28,11 +28,11 @@ Held by `contexts.rs`, which lists every account each instruction takes. None is
 
 Checked by reading `contexts.rs`: an absence is shown by the account lists, not by a test. `P6 exact rent refunds, fee losses, and event fields` checks the exact USDC, rent and fees each side ends with.
 
-**4. The call of claim 1, in which the stock returns to the writer only when the call expires unexercised or is canceled before it is bought.**
+**4. The call of claim 1, in which the stock returns to the writer only when the call expires unexercised, is canceled before it is bought, or is bought back by its writer from a holder who offers it.**
 
-Held by `cancel` and `reclaim` and their accounts in `contexts.rs`. `cancel` takes only an `Open` call, signed by its writer. `reclaim` is signed by the writer and runs only once the chain clock reaches `expiry_ts` (`NotExpired`). `call` stops at the same moment (`Expired`). No other instruction moves the stock in a vault.
+Held by `cancel`, `reclaim` and `close_out` and their accounts in `contexts.rs`. `cancel` takes only an `Open` call, signed by its writer. `reclaim` is signed by the writer and runs only once the chain clock reaches `expiry_ts` (`NotExpired`). `close_out` takes only a `Held` call whose holder is its writer, signed by the writer; the writer becomes the holder only by buying the call, from a holder's offer (`buy_listed`, `lock_and_buy_listed`) or while it is open. `call` stops at expiry (`Expired`). No other instruction moves the stock in a vault.
 
-Checked by `P4 expiry boundary, writer and holder authorization, final states` and `P2 admin cannot exercise, cancel, reclaim, or return another wallet lock`.
+Checked by `P4 expiry boundary, writer and holder authorization, final states`, `P2 admin cannot exercise, cancel, reclaim, or return another wallet lock`, and `call: buy_listed + close_out; stock to the writer, price to the holder, vault and listing closed, Cancelled with the writer as holder` in `tests/exit.test.ts`.
 
 **5. The call of claim 1, which cannot be bought before ONCE is issued and, for `gate_slots` slots after writing or after ONCE is issued, whichever is later, can be bought only by a wallet that locks ONCE against it, the ONCE being returned whole.**
 
@@ -54,7 +54,7 @@ Held by `list`, `buy_listed` and `lock_and_buy_listed`; checked by `tests/resale
 
 **8. A put option that holds, from the slot it is written, the total strike in USDC it promises, and releases it once to whoever holds the put when they hand over the exact raw amount of stock it names, the stock going to its writer in the same transaction.**
 
-Held by `write_put` and `exercise_put` in `lib.rs`, and their accounts in `contexts.rs`. Writing deposits exactly the strike. Only the holder may hand over the exact lot to any token account the writer owns for that stock, receiving the whole USDC vault in the same transaction; the vault closes to the writer. No other instruction releases it except the writer's cancellation or expiry reclaim.
+Held by `write_put` and `exercise_put` in `lib.rs`, and their accounts in `contexts.rs`. Writing deposits exactly the strike. Only the holder may hand over the exact lot to any token account the writer owns for that stock, receiving the whole USDC vault in the same transaction; the vault closes to the writer. No other instruction releases it except the writer's cancellation, expiry reclaim, or `close_out_put` after the writer buys it back.
 
 Checked by `write: strike moves into the USDC vault; buy only after the gate; exercise swaps the lot for the strike`, `the writer cannot keep the lot out: a memo-gated, reassigned or own account is replaced in the same transaction`, and `a confidential-transfer account of the writer is replaced by a fresh one` in `tests/put.test.ts`.
 
@@ -63,6 +63,18 @@ Checked by `write: strike moves into the USDC vault; buy only after the gate; ex
 Held by `BuyPut`, `PutGateGuard`, `LockAndBuyPut` and `ExercisePut` in `contexts.rs`: none takes a price account. `gate_end_put` applies the same gate as a call; `return_lock` returns the whole lock to its locker.
 
 Checked by `inside the gate only with the ONCE lock; the lock returns through return_lock` and `before ONCE registration puts inherit gate_floor; call and put locks cannot open each other` in `tests/put.test.ts`.
+
+**10. The put of claim 8, passed by its holder to another wallet at a price the holder names, the USDC staying in it; within the slots of claim 5, only to a wallet that locks ONCE.**
+
+Held by `list_put`, `buy_listed_put` and `lock_and_buy_listed_put`, reusing `Listing`, `ResaleLock`, `unlist` and `return_resale_lock`.
+
+Checked by `after the gate: holder changes, the USDC stays in the vault, the seller is paid, the listing closes; the new holder puts once` and `put: buy_listed_put fails InGate; lock_and_buy_listed_put locks; same-wallet rebuy stacks; locks return whole after the gate` in `tests/exit.test.ts`.
+
+**11. The call of claim 1 or the put of claim 8, bought back by its writer from a holder who offers it, everything in it returning to the writer in the same transaction; within the slots of claim 5, only by a writer that locks ONCE.**
+
+Held by `buy_listed` or `buy_listed_put` followed by `close_out` or `close_out_put` in one transaction; inside the gate, `lock_and_buy_listed` or `lock_and_buy_listed_put` replaces the purchase. The close-out requires the writer signer to hold the option, returns the whole vault and its rent to the writer, and records `Cancelled` with holder=writer. The writer must have the offered price before buying back.
+
+Checked by `call: buy_listed + close_out; stock to the writer, price to the holder, vault and listing closed, Cancelled with the writer as holder`, `put: buy_listed_put + close_out_put; the writer nets strike − price in USDC`, `put: a writer holding less USDC than the price cannot buy back, though the vault holds the strike`, and `inside the gate the writer buys back only by locking ONCE, for a call and for a put; its lock returns after the gate` in `tests/exit.test.ts`.
 
 ## Parts
 
@@ -73,10 +85,10 @@ The numbers are the reference numerals in the drawings on callonce.xyz.
 | (10) | housing | `Call` account at `["call", id]`, the id as a little-endian u64; a put is a `Put` account at `["put", id]`, numbered in the same sequence as calls |
 | (12) | stock | the vault, a token account at `["vault", call]` owned by the call |
 | (16) | strike | `Call.strike`, a total in raw USDC units for the whole lot; in a put, the strike sits in its vault, a USDC token account at `["put_vault", put]` owned by the put |
-| (18) | pin | `Call.state`: `Open` or `Held` while the stock is inside, `Exercised`, `Reclaimed` or `Cancelled` once it has left. No instruction sets it back |
+| (18) | pin | `Call.state`: `Open` or `Held` while the stock is inside, `Exercised`, `Reclaimed` or `Cancelled` once it has left. No instruction sets it back; a writer that buys its option back and closes it out leaves it `Cancelled`, with itself as holder |
 | (24) | gate | `Call.gate_until`, or `Config.gate_floor` for a call written before ONCE was set |
-| (28) | lock | `Lock` account at `["lock", call]` and its token account at `["lock_vault", call]`; a purchase from a holder inside the gate locks into a `ResaleLock` at `["resale_lock", call, buyer]` and its token account at `["resale_lock_vault", call, buyer]`, one per wallet and call, adding `lock_amount` on each such purchase; a put's lock is a `Lock` at `["lock", put]`, whose `call` field holds the put |
-| (30) | holder's mark | `Call.holder`; a price the holder names sits in a `Listing` account at `["listing", call]` |
+| (28) | lock | `Lock` account at `["lock", call]` and its token account at `["lock_vault", call]`; a purchase from a holder inside the gate locks into a `ResaleLock` at `["resale_lock", call, buyer]` and its token account at `["resale_lock_vault", call, buyer]`, one per wallet and call, adding `lock_amount` on each such purchase; a put's lock is a `Lock` at `["lock", put]`, whose `call` field holds the put; a purchase of a put from its holder inside the gate locks the same way at `["resale_lock", put, buyer]` |
+| (30) | holder's mark | `Call.holder`; a price the holder names sits in a `Listing` account at `["listing", call]`, or `["listing", put]` for a put |
 | (32) | ONCE | the mint in `Config.once_mint`; the config account is at `["config"]` |
 
 ## Instructions
@@ -101,6 +113,11 @@ The numbers are the reference numerals in the drawings on callonce.xyz.
 | `exercise_put` | holder | held, before expiry, vault holds at least the strike | The lot goes to any token account the writer owns for that stock; the whole USDC vault moves to the holder and closes, its rent to the writer |
 | `cancel_put` | writer | open | Returns the whole USDC vault to the writer; the vault closes |
 | `reclaim_put` | writer | open or held, at or after expiry | Returns the whole USDC vault to the writer; the vault closes |
+| `list_put` | holder | held, before expiry, positive price | Offers the put or changes its price; the holder pays listing rent |
+| `buy_listed_put` | buyer | held, before expiry, gate open, signed price matches | Pays the holder that price, passes the put to the buyer and returns listing rent to the seller; the USDC stays in its vault |
+| `lock_and_buy_listed_put` | buyer | held, before expiry, gate shut, signed price matches | Adds a fresh `lock_amount` to the buyer's resale lock, then buys as above |
+| `close_out` | writer | held by its writer | Returns the whole stock vault and its rent to the writer; leaves the call `Cancelled`, holder=writer |
+| `close_out_put` | writer | held by its writer | Returns the whole USDC vault and its rent to the writer; leaves the put `Cancelled`, holder=writer |
 | `init`, `set_once`, `set_params` | upgrade authority, admin | | Configuration. None of them can move the stock in a vault or the ONCE in a lock |
 
 Expiry is checked against the chain clock (`Clock::unix_timestamp`). The gate is counted in slots.

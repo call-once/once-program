@@ -794,6 +794,180 @@ pub mod once {
         });
         Ok(())
     }
+
+    pub fn list_put(ctx: Context<ListPut>, price: u64) -> Result<()> {
+        require!(price > 0, OnceError::InvalidValue);
+        let clock = Clock::get()?;
+        let put = &ctx.accounts.put;
+        require!(clock.unix_timestamp < put.expiry_ts, OnceError::Expired);
+        let holder = ctx.accounts.holder.key();
+        let listing = &mut ctx.accounts.listing;
+        require!(
+            listing.seller == Pubkey::default() || listing.seller == holder,
+            OnceError::NotSeller
+        );
+        listing.set_inner(Listing {
+            call: put.key(),
+            seller: holder,
+            price,
+            listed_slot: clock.slot,
+            bump: ctx.bumps.listing,
+        });
+        emit_cpi!(PutListed {
+            put: put.key(),
+            id: put.id,
+            seller: holder,
+            price,
+            slot: clock.slot
+        });
+        Ok(())
+    }
+
+    pub fn buy_listed_put(ctx: Context<BuyListedPut>, price: u64) -> Result<()> {
+        let clock = Clock::get()?;
+        let put = &mut ctx.accounts.put;
+        require!(clock.unix_timestamp < put.expiry_ts, OnceError::Expired);
+        require!(clock.slot >= gate_end_put(put, &ctx.accounts.config), OnceError::InGate);
+        require_eq!(ctx.accounts.listing.price, price, OnceError::PriceChanged);
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.payment_source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            price,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        let seller = ctx.accounts.listing.seller;
+        put.holder = Some(ctx.accounts.buyer.key());
+        put.bought_slot = clock.slot;
+        emit_cpi!(PutResold {
+            put: put.key(),
+            id: put.id,
+            seller,
+            buyer: ctx.accounts.buyer.key(),
+            price,
+            slot: clock.slot,
+            locked: 0
+        });
+        Ok(())
+    }
+
+    pub fn lock_and_buy_listed_put(ctx: Context<LockAndBuyListedPut>, price: u64) -> Result<()> {
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.config;
+        let put = &mut ctx.accounts.put;
+        require!(clock.unix_timestamp < put.expiry_ts, OnceError::Expired);
+        require!(config.once_mint.is_some(), OnceError::OnceNotSet);
+        let end = gate_end_put(put, config);
+        require!(clock.slot < end, OnceError::GateClosed);
+        require_eq!(ctx.accounts.listing.price, price, OnceError::PriceChanged);
+        let amount = config.lock_amount;
+        // As for a call: a wallet that buys the same put again inside the gate adds a fresh lock_amount to its resale lock.
+        let held = ctx.accounts.lock_vault.amount;
+        let total = held.checked_add(amount).ok_or(OnceError::Overflow)?;
+        transfer(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.once_source.to_account_info(),
+            ctx.accounts.once_mint.to_account_info(),
+            ctx.accounts.lock_vault.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            amount,
+            ctx.accounts.once_mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.lock_vault.reload()?;
+        require_eq!(ctx.accounts.lock_vault.amount, total, OnceError::DepositMismatch);
+        let lock = &mut ctx.accounts.lock;
+        if lock.locker == Pubkey::default() {
+            lock.set_inner(ResaleLock {
+                locker: ctx.accounts.buyer.key(),
+                call: put.key(),
+                amount,
+                release_slot: end,
+                bump: ctx.bumps.lock,
+            });
+        } else {
+            require_keys_eq!(lock.locker, ctx.accounts.buyer.key(), OnceError::NotLocker);
+            require_eq!(lock.release_slot, end, OnceError::InvalidValue);
+            lock.amount = lock.amount.checked_add(amount).ok_or(OnceError::Overflow)?;
+        }
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.payment_source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            price,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        let seller = ctx.accounts.listing.seller;
+        put.holder = Some(ctx.accounts.buyer.key());
+        put.bought_slot = clock.slot;
+        emit_cpi!(PutResold {
+            put: put.key(),
+            id: put.id,
+            seller,
+            buyer: ctx.accounts.buyer.key(),
+            price,
+            slot: clock.slot,
+            locked: amount
+        });
+        Ok(())
+    }
+
+    pub fn close_out(ctx: Context<CloseOut>) -> Result<()> {
+        let call = &mut ctx.accounts.call;
+        let returned = ctx.accounts.vault.amount;
+        settle(
+            call,
+            ctx.accounts.token_program.key(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.mint.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            returned,
+            ctx.accounts.mint.decimals,
+        )?;
+        // A close-out ends as Cancelled with the writer as holder; CallState keeps its five values.
+        call.state = CallState::Cancelled;
+        call.settled_slot = Clock::get()?.slot;
+        emit_cpi!(ClosedOut {
+            call: call.key(),
+            id: call.id,
+            writer: call.writer,
+            returned,
+            slot: call.settled_slot
+        });
+        Ok(())
+    }
+
+    pub fn close_out_put(ctx: Context<CloseOutPut>) -> Result<()> {
+        let put = &mut ctx.accounts.put;
+        let returned = ctx.accounts.vault.amount;
+        settle_put(
+            put,
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            returned,
+            ctx.accounts.usdc_mint.decimals,
+        )?;
+        put.state = CallState::Cancelled;
+        put.settled_slot = Clock::get()?.slot;
+        emit_cpi!(PutClosedOut {
+            put: put.key(),
+            id: put.id,
+            writer: put.writer,
+            returned,
+            slot: put.settled_slot
+        });
+        Ok(())
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

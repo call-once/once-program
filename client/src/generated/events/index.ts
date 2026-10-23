@@ -8,6 +8,7 @@
 
 export * from "./bought.js";
 export * from "./cancelled.js";
+export * from "./closedOut.js";
 export * from "./exercised.js";
 export * from "./initialized.js";
 export * from "./listed.js";
@@ -16,8 +17,11 @@ export * from "./onceSet.js";
 export * from "./paramsSet.js";
 export * from "./putBought.js";
 export * from "./putCancelled.js";
+export * from "./putClosedOut.js";
 export * from "./putExercised.js";
+export * from "./putListed.js";
 export * from "./putReclaimed.js";
+export * from "./putResold.js";
 export * from "./putWritten.js";
 export * from "./reclaimed.js";
 export * from "./resaleLockReturned.js";

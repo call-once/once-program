@@ -228,6 +228,118 @@
       ]
     },
     {
+      "name": "buy_listed_put",
+      "discriminator": [
+        82,
+        203,
+        80,
+        128,
+        219,
+        2,
+        38,
+        95
+      ],
+      "accounts": [
+        {
+          "name": "buyer",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "put",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "put.id",
+                "account": "Put"
+              }
+            ]
+          }
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "put"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "usdc_token_program"
+        },
+        {
+          "name": "payment_source",
+          "writable": true
+        },
+        {
+          "name": "payment_destination",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "buy_put",
       "discriminator": [
         37,
@@ -681,6 +793,177 @@
       "args": []
     },
     {
+      "name": "close_out",
+      "discriminator": [
+        68,
+        15,
+        249,
+        95,
+        48,
+        93,
+        164,
+        248
+      ],
+      "accounts": [
+        {
+          "name": "writer",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "call"
+          ]
+        },
+        {
+          "name": "call",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "call.id",
+                "account": "Call"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "call"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_out_put",
+      "discriminator": [
+        162,
+        46,
+        153,
+        250,
+        76,
+        236,
+        223,
+        128
+      ],
+      "accounts": [
+        {
+          "name": "writer",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "put"
+          ]
+        },
+        {
+          "name": "put",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "put.id",
+                "account": "Put"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  117,
+                  116,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "put"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "usdc_token_program"
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "exercise_put",
       "discriminator": [
         120,
@@ -914,6 +1197,86 @@
               {
                 "kind": "account",
                 "path": "call"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "list_put",
+      "discriminator": [
+        100,
+        33,
+        224,
+        105,
+        202,
+        151,
+        225,
+        126
+      ],
+      "accounts": [
+        {
+          "name": "holder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "put",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "put.id",
+                "account": "Put"
+              }
+            ]
+          }
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "put"
               }
             ]
           }
@@ -1263,6 +1626,203 @@
               {
                 "kind": "account",
                 "path": "call"
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "once_mint"
+        },
+        {
+          "name": "once_token_program"
+        },
+        {
+          "name": "once_source",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "usdc_token_program"
+        },
+        {
+          "name": "payment_source",
+          "writable": true
+        },
+        {
+          "name": "payment_destination",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "lock_and_buy_listed_put",
+      "discriminator": [
+        164,
+        149,
+        201,
+        101,
+        159,
+        138,
+        13,
+        50
+      ],
+      "accounts": [
+        {
+          "name": "buyer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "put",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "put.id",
+                "account": "Put"
+              }
+            ]
+          }
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "put"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller",
+          "writable": true
+        },
+        {
+          "name": "lock",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  115,
+                  97,
+                  108,
+                  101,
+                  95,
+                  108,
+                  111,
+                  99,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "put"
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "lock_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  115,
+                  97,
+                  108,
+                  101,
+                  95,
+                  108,
+                  111,
+                  99,
+                  107,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "put"
               },
               {
                 "kind": "account",
@@ -2441,6 +3001,19 @@
       ]
     },
     {
+      "name": "ClosedOut",
+      "discriminator": [
+        35,
+        124,
+        78,
+        96,
+        213,
+        145,
+        182,
+        43
+      ]
+    },
+    {
       "name": "Exercised",
       "discriminator": [
         199,
@@ -2545,6 +3118,19 @@
       ]
     },
     {
+      "name": "PutClosedOut",
+      "discriminator": [
+        167,
+        237,
+        28,
+        173,
+        160,
+        119,
+        1,
+        156
+      ]
+    },
+    {
       "name": "PutExercised",
       "discriminator": [
         82,
@@ -2558,6 +3144,19 @@
       ]
     },
     {
+      "name": "PutListed",
+      "discriminator": [
+        42,
+        121,
+        116,
+        143,
+        11,
+        147,
+        201,
+        94
+      ]
+    },
+    {
       "name": "PutReclaimed",
       "discriminator": [
         47,
@@ -2568,6 +3167,19 @@
         17,
         47,
         131
+      ]
+    },
+    {
+      "name": "PutResold",
+      "discriminator": [
+        160,
+        108,
+        177,
+        250,
+        25,
+        220,
+        212,
+        155
       ]
     },
     {
@@ -2928,6 +3540,34 @@
     },
     {
       "name": "Cancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "call",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "writer",
+            "type": "pubkey"
+          },
+          {
+            "name": "returned",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ClosedOut",
       "type": {
         "kind": "struct",
         "fields": [
@@ -3337,6 +3977,34 @@
       }
     },
     {
+      "name": "PutClosedOut",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "put",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "writer",
+            "type": "pubkey"
+          },
+          {
+            "name": "returned",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "PutExercised",
       "type": {
         "kind": "struct",
@@ -3363,6 +4031,34 @@
           },
           {
             "name": "paid",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PutListed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "put",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "price",
             "type": "u64"
           },
           {
@@ -3401,6 +4097,42 @@
           },
           {
             "name": "slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PutResold",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "put",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "locked",
             "type": "u64"
           }
         ]

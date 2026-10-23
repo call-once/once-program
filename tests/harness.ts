@@ -241,7 +241,9 @@ export class Harness {
           if (!before?.exists || !priorCall?.exists) throw new Error('Missing pre-resale accounts');
           const listing = once.getListingDecoder().decode(before.data), call = once.getCallAccountDecoder().decode(accountData(this.svm, event.data.call));
           const old = once.getCallAccountDecoder().decode(priorCall.data);
-          expect(accountData(this.svm, event.data.call)).toEqual(Buffer.from(once.getCallAccountEncoder().encode({ ...old, holder: call.holder, boughtSlot: this.svm.getClock().slot })));
+          // a take-back later in the same transaction settles the call it bought
+          const settled = events.some(e => e.name === 'ClosedOut' && (e.data as any).call === event.data.call) ? { state: call.state, settledSlot: call.settledSlot } : {};
+          expect(accountData(this.svm, event.data.call)).toEqual(Buffer.from(once.getCallAccountEncoder().encode({ ...old, holder: call.holder, boughtSlot: this.svm.getClock().slot, ...settled })));
           expect(event.data).toEqual({ call: listing.call, id: call.id, seller: listing.seller, buyer: unwrapOption(call.holder),
             price: listing.price, slot: call.boughtSlot, locked: ixs.some(ix => ix.programAddress === PROGRAM && once.LOCK_AND_BUY_LISTED_DISCRIMINATOR.every((v,i) => ix.data?.[i] === v)) ? this.configState().lockAmount : 0n });
           expect(old.holder).toEqual({ __option: 'Some', value: listing.seller });
@@ -265,7 +267,27 @@ export class Harness {
           }
           if (event.name === 'PutCancelled') { expect(d).toEqual({ ...common, writer: put.writer, returned: held, slot: put.settledSlot }); expect(put.state).toBe(once.CallState.Cancelled); }
           if (event.name === 'PutReclaimed') { expect(d).toEqual({ ...common, writer: put.writer, holder: put.holder, returned: held, slot: put.settledSlot }); expect(put.state).toBe(once.CallState.Reclaimed); }
-          if (['PutExercised', 'PutCancelled', 'PutReclaimed'].includes(event.name)) expect(this.svm.getAccount(vaultAddress).exists).toBe(false);
+          if (event.name === 'PutClosedOut') { expect(d).toEqual({ ...common, writer: put.writer, returned: held, slot: put.settledSlot });
+            expect(put.state).toBe(once.CallState.Cancelled); expect(unwrapOption(put.holder)).toBe(put.writer); }
+          if (event.name === 'PutListed') {
+            const listing = once.getListingDecoder().decode(accountData(this.svm, (await findListingPda(d.put))[0]));
+            expect(d).toEqual({ ...common, seller: listing.seller, price: listing.price, slot: listing.listedSlot });
+            expect(listing.call).toBe(d.put);
+          }
+          if (event.name === 'PutResold') {
+            const at = (await findListingPda(d.put))[0], before = priorByKey.get(at), priorPut = priorByKey.get(d.put);
+            if (!before?.exists || !priorPut?.exists) throw new Error('Missing pre-resale accounts');
+            const listing = once.getListingDecoder().decode(before.data), old = once.getPutDecoder().decode(priorPut.data);
+            const settled = events.some(e => e.name === 'PutClosedOut' && (e.data as any).put === d.put) ? { state: put.state, settledSlot: put.settledSlot } : {};
+            expect(accountData(this.svm, d.put)).toEqual(Buffer.from(once.getPutEncoder().encode({ ...old, holder: put.holder, boughtSlot: this.svm.getClock().slot, ...settled })));
+            const rl = this.svm.getAccount((await findResaleLockPda(d.put, d.buyer))[0]);
+            expect(d).toEqual({ ...common, seller: listing.seller, buyer: unwrapOption(put.holder), price: listing.price, slot: put.boughtSlot,
+              locked: ixs.some(ix => ix.programAddress === PROGRAM && once.LOCK_AND_BUY_LISTED_PUT_DISCRIMINATOR.every((v,i) => ix.data?.[i] === v)) ? this.configState().lockAmount : 0n });
+            expect(old.holder).toEqual({ __option: 'Some', value: listing.seller });
+            expect(this.svm.getAccount(at).exists).toBe(false);
+            void rl;
+          }
+          if (['PutExercised', 'PutCancelled', 'PutReclaimed', 'PutClosedOut'].includes(event.name)) expect(this.svm.getAccount(vaultAddress).exists).toBe(false);
         } else if (event.name === 'LockReturned' || event.name === 'ResaleLockReturned') {
           const resale = event.name === 'ResaleLockReturned';
           const lockAddress = (await (resale ? findResaleLockPda(event.data.call, event.data.locker) : findLockPda(event.data.call)))[0];
@@ -305,6 +327,12 @@ export class Harness {
             case 'Cancelled':
               expect(event.data).toEqual({ ...common, writer: call.writer, returned, slot: call.settledSlot });
               expect(call.state).toBe(once.CallState.Cancelled);
+              expect(this.svm.getAccount(vaultAddress).exists).toBe(false);
+              break;
+            case 'ClosedOut':
+              expect(event.data).toEqual({ ...common, writer: call.writer, returned, slot: call.settledSlot });
+              expect(call.state).toBe(once.CallState.Cancelled);
+              expect(unwrapOption(call.holder)).toBe(call.writer);
               expect(this.svm.getAccount(vaultAddress).exists).toBe(false);
               break;
             case 'Reclaimed':
