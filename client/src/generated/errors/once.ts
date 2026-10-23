@@ -72,6 +72,12 @@ export const ONCE_ERROR__NOT_SELLER = 0x178a; // 6026
 export const ONCE_ERROR__PRICE_CHANGED = 0x178b; // 6027
 /** NonTransferableMint: Stock mint does not allow transfers */
 export const ONCE_ERROR__NON_TRANSFERABLE_MINT = 0x178c; // 6028
+/** WrongKind: Order is for the other kind of option */
+export const ONCE_ERROR__WRONG_KIND = 0x178d; // 6029
+/** NotBuyer: Signer is not the order's buyer */
+export const ONCE_ERROR__NOT_BUYER = 0x178e; // 6030
+/** TermsMismatch: Order terms differ from the ones named */
+export const ONCE_ERROR__TERMS_MISMATCH = 0x178f; // 6031
 
 export type OnceError =
   | typeof ONCE_ERROR__ALREADY_SETTLED
@@ -86,6 +92,7 @@ export type OnceError =
   | typeof ONCE_ERROR__LOCK_NOT_RELEASED
   | typeof ONCE_ERROR__NON_TRANSFERABLE_MINT
   | typeof ONCE_ERROR__NOT_ADMIN
+  | typeof ONCE_ERROR__NOT_BUYER
   | typeof ONCE_ERROR__NOT_EXPIRED
   | typeof ONCE_ERROR__NOT_HELD
   | typeof ONCE_ERROR__NOT_HOLDER
@@ -98,10 +105,12 @@ export type OnceError =
   | typeof ONCE_ERROR__Once_NOT_SET
   | typeof ONCE_ERROR__OVERFLOW
   | typeof ONCE_ERROR__PRICE_CHANGED
+  | typeof ONCE_ERROR__TERMS_MISMATCH
   | typeof ONCE_ERROR__TRANSFER_FEE_MINT
   | typeof ONCE_ERROR__TRANSFER_HOOK_ACTIVE
   | typeof ONCE_ERROR__UNSUPPORTED_TOKEN_PROGRAM
   | typeof ONCE_ERROR__VAULT_SHORT
+  | typeof ONCE_ERROR__WRONG_KIND
   | typeof ONCE_ERROR__WRONG_MINT;
 
 let onceErrorMessages: Record<OnceError, string> | undefined;
@@ -119,6 +128,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [ONCE_ERROR__LOCK_NOT_RELEASED]: `Lock release slot has not arrived`,
     [ONCE_ERROR__NON_TRANSFERABLE_MINT]: `Stock mint does not allow transfers`,
     [ONCE_ERROR__NOT_ADMIN]: `Only the admin may update configuration`,
+    [ONCE_ERROR__NOT_BUYER]: `Signer is not the order's buyer`,
     [ONCE_ERROR__NOT_EXPIRED]: `Call has not expired`,
     [ONCE_ERROR__NOT_HELD]: `Call is not held`,
     [ONCE_ERROR__NOT_HOLDER]: `Signer is not the holder`,
@@ -131,10 +141,12 @@ if (process.env["NODE_ENV"] !== "production") {
     [ONCE_ERROR__Once_NOT_SET]: `ONCE mint has not been set`,
     [ONCE_ERROR__OVERFLOW]: `Checked arithmetic overflow`,
     [ONCE_ERROR__PRICE_CHANGED]: `Listing price differs from the price agreed`,
+    [ONCE_ERROR__TERMS_MISMATCH]: `Order terms differ from the ones named`,
     [ONCE_ERROR__TRANSFER_FEE_MINT]: `Transfer fee mints are not supported`,
     [ONCE_ERROR__TRANSFER_HOOK_ACTIVE]: `An active transfer hook is not supported`,
     [ONCE_ERROR__UNSUPPORTED_TOKEN_PROGRAM]: `Unsupported token program`,
     [ONCE_ERROR__VAULT_SHORT]: `Vault holds less than the call lot`,
+    [ONCE_ERROR__WRONG_KIND]: `Order is for the other kind of option`,
     [ONCE_ERROR__WRONG_MINT]: `Incorrect mint`,
   };
 }

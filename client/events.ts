@@ -25,6 +25,9 @@ const decoders = {
   PutResold: generated.getPutResoldEventDecoder(),
   ClosedOut: generated.getClosedOutEventDecoder(),
   PutClosedOut: generated.getPutClosedOutEventDecoder(),
+  OrderPlaced: generated.getOrderPlacedEventDecoder(),
+  OrderCancelled: generated.getOrderCancelledEventDecoder(),
+  OrderFilled: generated.getOrderFilledEventDecoder(),
 };
 export type DecodedOnceEvent = { [K in keyof typeof decoders]: {
   name: K; data: ReturnType<(typeof decoders)[K]['decode']>;

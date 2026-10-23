@@ -60,4 +60,10 @@ pub enum OnceError {
     PriceChanged,
     #[msg("Stock mint does not allow transfers")]
     NonTransferableMint,
+    #[msg("Order is for the other kind of option")]
+    WrongKind,
+    #[msg("Signer is not the order's buyer")]
+    NotBuyer,
+    #[msg("Order terms differ from the ones named")]
+    TermsMismatch,
 }

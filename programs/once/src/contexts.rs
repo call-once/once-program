@@ -655,3 +655,174 @@ pub struct CloseOutPut<'info> {
     #[account(mut, token::mint = usdc_mint, token::authority = writer, token::token_program = usdc_token_program)]
     pub destination: Box<InterfaceAccount<'info, TokenAccount>>,
 }
+
+// Placing an order locks ONCE, so ONCE must be set.
+fn new_order_space(config: &Config) -> Result<usize> {
+    require!(config.once_mint.is_some(), OnceError::OnceNotSet);
+    Ok(8 + Order::INIT_SPACE)
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+#[instruction(nonce: u64)]
+pub struct PlaceOrder<'info> {
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(init, payer = buyer, space = new_order_space(&config)?,
+        seeds = [b"order".as_ref(), buyer.key().as_ref(), nonce.to_le_bytes().as_ref()], bump)]
+    pub order: Box<Account<'info, Order>>,
+    #[account(init, payer = buyer, seeds = [b"order_vault", order.key().as_ref()], bump,
+        token::mint = usdc_mint, token::authority = order, token::token_program = usdc_token_program)]
+    pub order_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(init, payer = buyer, seeds = [b"order_once", order.key().as_ref()], bump,
+        token::mint = once_mint, token::authority = order, token::token_program = once_token_program)]
+    pub order_once: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(constraint = *mint.to_account_info().owner == token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
+    pub token_program: Interface<'info, TokenInterface>,
+    #[account(constraint = Some(once_mint.key()) == config.once_mint @ OnceError::WrongMint,
+        constraint = *once_mint.to_account_info().owner == once_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub once_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(constraint = Some(once_token_program.key()) == config.once_token_program @ OnceError::UnsupportedTokenProgram)]
+    pub once_token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = once_mint, token::authority = buyer, token::token_program = once_token_program)]
+    pub once_source: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(address = config.usdc_mint @ OnceError::WrongMint,
+        constraint = *usdc_mint.to_account_info().owner == usdc_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub usdc_token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = usdc_mint, token::authority = buyer, token::token_program = usdc_token_program)]
+    pub payment_source: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct CancelOrder<'info> {
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, seeds = [b"order", order.buyer.as_ref(), &order.nonce.to_le_bytes()], bump = order.bump,
+        has_one = buyer @ OnceError::NotBuyer, close = buyer)]
+    pub order: Box<Account<'info, Order>>,
+    #[account(mut, seeds = [b"order_vault", order.key().as_ref()], bump,
+        token::mint = usdc_mint, token::authority = order, token::token_program = usdc_token_program)]
+    pub order_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"order_once", order.key().as_ref()], bump,
+        token::mint = once_mint, token::authority = order, token::token_program = once_token_program)]
+    pub order_once: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(constraint = Some(once_mint.key()) == config.once_mint @ OnceError::WrongMint,
+        constraint = *once_mint.to_account_info().owner == once_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub once_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(constraint = Some(once_token_program.key()) == config.once_token_program @ OnceError::UnsupportedTokenProgram)]
+    pub once_token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = once_mint, token::authority = buyer, token::token_program = once_token_program)]
+    pub once_destination: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(address = config.usdc_mint @ OnceError::WrongMint,
+        constraint = *usdc_mint.to_account_info().owner == usdc_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub usdc_token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = usdc_mint, token::authority = buyer, token::token_program = usdc_token_program)]
+    pub payment_destination: Box<InterfaceAccount<'info, TokenAccount>>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+#[instruction(id: u64)]
+pub struct FillOrder<'info> {
+    #[account(mut)]
+    pub writer: Signer<'info>,
+    #[account(mut, seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, seeds = [b"order", order.buyer.as_ref(), &order.nonce.to_le_bytes()], bump = order.bump,
+        constraint = order.kind == OptionKind::Call @ OnceError::WrongKind, close = buyer)]
+    pub order: Box<Account<'info, Order>>,
+    /// CHECK: Receives only the order's rent; address is bound to the order's buyer.
+    #[account(mut, address = order.buyer @ OnceError::NotBuyer)]
+    pub buyer: UncheckedAccount<'info>,
+    #[account(mut, seeds = [b"order_vault", order.key().as_ref()], bump,
+        token::mint = usdc_mint, token::authority = order, token::token_program = usdc_token_program)]
+    pub order_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"order_once", order.key().as_ref()], bump,
+        token::mint = once_mint, token::authority = order, token::token_program = once_token_program)]
+    pub order_once: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(init, payer = writer, space = new_call_space(&config, id)?, seeds = [b"call".as_ref(), id.to_le_bytes().as_ref()], bump)]
+    pub call: Box<Account<'info, Call>>,
+    #[account(init, payer = writer, seeds = [b"vault", call.key().as_ref()], bump,
+        token::mint = mint, token::authority = call, token::token_program = token_program)]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(init, payer = writer, space = 8 + Lock::INIT_SPACE, seeds = [b"lock", call.key().as_ref()], bump)]
+    pub option_lock: Box<Account<'info, Lock>>,
+    #[account(init, payer = writer, seeds = [b"lock_vault", call.key().as_ref()], bump,
+        token::mint = once_mint, token::authority = option_lock, token::token_program = once_token_program)]
+    pub option_lock_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(address = order.mint @ OnceError::WrongMint,
+        constraint = *mint.to_account_info().owner == token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(address = order.token_program @ OnceError::UnsupportedTokenProgram)]
+    pub token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = mint, token::authority = writer, token::token_program = token_program)]
+    pub source: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(address = config.usdc_mint @ OnceError::WrongMint,
+        constraint = *usdc_mint.to_account_info().owner == usdc_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub usdc_token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = usdc_mint, token::authority = writer, token::token_program = usdc_token_program)]
+    pub payment_destination: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(constraint = Some(once_mint.key()) == config.once_mint @ OnceError::WrongMint,
+        constraint = *once_mint.to_account_info().owner == once_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub once_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(constraint = Some(once_token_program.key()) == config.once_token_program @ OnceError::UnsupportedTokenProgram)]
+    pub once_token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+#[instruction(id: u64)]
+pub struct FillPutOrder<'info> {
+    #[account(mut)]
+    pub writer: Signer<'info>,
+    #[account(mut, seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, seeds = [b"order", order.buyer.as_ref(), &order.nonce.to_le_bytes()], bump = order.bump,
+        constraint = order.kind == OptionKind::Put @ OnceError::WrongKind, close = buyer)]
+    pub order: Box<Account<'info, Order>>,
+    /// CHECK: Receives only the order's rent; address is bound to the order's buyer.
+    #[account(mut, address = order.buyer @ OnceError::NotBuyer)]
+    pub buyer: UncheckedAccount<'info>,
+    #[account(mut, seeds = [b"order_vault", order.key().as_ref()], bump,
+        token::mint = usdc_mint, token::authority = order, token::token_program = usdc_token_program)]
+    pub order_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"order_once", order.key().as_ref()], bump,
+        token::mint = once_mint, token::authority = order, token::token_program = once_token_program)]
+    pub order_once: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(init, payer = writer, space = new_put_space(&config, id)?, seeds = [b"put".as_ref(), id.to_le_bytes().as_ref()], bump)]
+    pub put: Box<Account<'info, Put>>,
+    #[account(init, payer = writer, seeds = [b"put_vault", put.key().as_ref()], bump,
+        token::mint = usdc_mint, token::authority = put, token::token_program = usdc_token_program)]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(init, payer = writer, space = 8 + Lock::INIT_SPACE, seeds = [b"lock", put.key().as_ref()], bump)]
+    pub option_lock: Box<Account<'info, Lock>>,
+    #[account(init, payer = writer, seeds = [b"lock_vault", put.key().as_ref()], bump,
+        token::mint = once_mint, token::authority = option_lock, token::token_program = once_token_program)]
+    pub option_lock_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(address = order.mint @ OnceError::WrongMint,
+        constraint = *mint.to_account_info().owner == order.token_program @ OnceError::UnsupportedTokenProgram)]
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(address = config.usdc_mint @ OnceError::WrongMint,
+        constraint = *usdc_mint.to_account_info().owner == usdc_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub usdc_token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = usdc_mint, token::authority = writer, token::token_program = usdc_token_program)]
+    pub usdc: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(constraint = Some(once_mint.key()) == config.once_mint @ OnceError::WrongMint,
+        constraint = *once_mint.to_account_info().owner == once_token_program.key() @ OnceError::UnsupportedTokenProgram)]
+    pub once_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(constraint = Some(once_token_program.key()) == config.once_token_program @ OnceError::UnsupportedTokenProgram)]
+    pub once_token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+}

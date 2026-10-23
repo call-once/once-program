@@ -968,6 +968,318 @@ pub mod once {
         });
         Ok(())
     }
+
+    pub fn place_order(
+        ctx: Context<PlaceOrder>,
+        nonce: u64,
+        kind: OptionKind,
+        lot: u64,
+        strike: u64,
+        premium: u64,
+        expiry_ts: i64,
+    ) -> Result<()> {
+        require!(
+            lot > 0 && strike > 0 && premium > 0,
+            OnceError::InvalidValue
+        );
+        let clock = Clock::get()?;
+        require!(expiry_ts > clock.unix_timestamp, OnceError::ExpiryNotFuture);
+        match kind {
+            OptionKind::Call => mint::validate_mint(&ctx.accounts.mint.to_account_info())?,
+            OptionKind::Put => mint::validate_put_mint(&ctx.accounts.mint.to_account_info())?,
+        }
+        let amount = ctx.accounts.config.lock_amount;
+        transfer(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.once_source.to_account_info(),
+            ctx.accounts.once_mint.to_account_info(),
+            ctx.accounts.order_once.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            amount,
+            ctx.accounts.once_mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.order_once.reload()?;
+        require_eq!(ctx.accounts.order_once.amount, amount, OnceError::DepositMismatch);
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.payment_source.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.order_vault.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            premium,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.order_vault.reload()?;
+        require_eq!(ctx.accounts.order_vault.amount, premium, OnceError::DepositMismatch);
+        ctx.accounts.order.set_inner(Order {
+            buyer: ctx.accounts.buyer.key(),
+            nonce,
+            kind,
+            mint: ctx.accounts.mint.key(),
+            token_program: ctx.accounts.token_program.key(),
+            lot,
+            strike,
+            premium,
+            expiry_ts,
+            placed_slot: clock.slot,
+            bump: ctx.bumps.order,
+        });
+        emit_cpi!(OrderPlaced {
+            order: ctx.accounts.order.key(),
+            buyer: ctx.accounts.buyer.key(),
+            nonce,
+            kind,
+            mint: ctx.accounts.mint.key(),
+            lot,
+            strike,
+            premium,
+            expiry_ts,
+            locked: amount,
+            slot: clock.slot
+        });
+        Ok(())
+    }
+
+    pub fn cancel_order(ctx: Context<CancelOrder>) -> Result<()> {
+        let order = &ctx.accounts.order;
+        let nonce = order.nonce.to_le_bytes();
+        let seeds: &[&[u8]] = &[b"order", order.buyer.as_ref(), &nonce, &[order.bump]];
+        let premium = ctx.accounts.order_vault.amount;
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.order_vault.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            order.to_account_info(),
+            premium,
+            ctx.accounts.usdc_mint.decimals,
+            &[seeds],
+        )?;
+        close(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.order_vault.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            order.to_account_info(),
+            &[seeds],
+        )?;
+        let unlocked = ctx.accounts.order_once.amount;
+        transfer(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.order_once.to_account_info(),
+            ctx.accounts.once_mint.to_account_info(),
+            ctx.accounts.once_destination.to_account_info(),
+            order.to_account_info(),
+            unlocked,
+            ctx.accounts.once_mint.decimals,
+            &[seeds],
+        )?;
+        close(
+            ctx.accounts.once_token_program.key(),
+            ctx.accounts.order_once.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            order.to_account_info(),
+            &[seeds],
+        )?;
+        emit_cpi!(OrderCancelled {
+            order: order.key(),
+            buyer: order.buyer,
+            premium,
+            unlocked,
+            slot: Clock::get()?.slot
+        });
+        Ok(())
+    }
+
+    pub fn fill_order(
+        ctx: Context<FillOrder>,
+        id: u64,
+        lot: u64,
+        strike: u64,
+        premium: u64,
+        expiry_ts: i64,
+    ) -> Result<()> {
+        let clock = Clock::get()?;
+        let order = &ctx.accounts.order;
+        require!(
+            order.lot == lot && order.strike == strike && order.premium == premium && order.expiry_ts == expiry_ts,
+            OnceError::TermsMismatch
+        );
+        require!(clock.unix_timestamp < order.expiry_ts, OnceError::ExpiryNotFuture);
+        mint::validate_mint(&ctx.accounts.mint.to_account_info())?;
+        let config = &mut ctx.accounts.config;
+        let gate_until = clock
+            .slot
+            .checked_add(config.gate_slots)
+            .ok_or(OnceError::Overflow)?;
+        config.next_id = id.checked_add(1).ok_or(OnceError::Overflow)?;
+        transfer(
+            ctx.accounts.token_program.key(),
+            ctx.accounts.source.to_account_info(),
+            ctx.accounts.mint.to_account_info(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            order.lot,
+            ctx.accounts.mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.vault.reload()?;
+        require_eq!(ctx.accounts.vault.amount, order.lot, OnceError::DepositMismatch);
+        let paid = pay_order(
+            order,
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.order_vault.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.payment_destination.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            ctx.accounts.order_vault.amount,
+            ctx.accounts.usdc_mint.decimals,
+        )?;
+        let locked = lock_order_once(
+            order,
+            ctx.accounts.once_token_program.key(),
+            &mut ctx.accounts.order_once,
+            ctx.accounts.once_mint.to_account_info(),
+            ctx.accounts.once_mint.decimals,
+            &mut ctx.accounts.option_lock_vault,
+            ctx.accounts.buyer.to_account_info(),
+        )?;
+        let call = ctx.accounts.call.key();
+        ctx.accounts.option_lock.set_inner(Lock {
+            locker: order.buyer,
+            call,
+            amount: locked,
+            release_slot: gate_until,
+            bump: ctx.bumps.option_lock,
+        });
+        ctx.accounts.call.set_inner(Call {
+            id,
+            writer: ctx.accounts.writer.key(),
+            mint: order.mint,
+            token_program: order.token_program,
+            lot: order.lot,
+            strike: order.strike,
+            premium: order.premium,
+            expiry_ts: order.expiry_ts,
+            written_slot: clock.slot,
+            gate_until,
+            state: CallState::Held,
+            holder: Some(order.buyer),
+            bought_slot: clock.slot,
+            settled_slot: 0,
+            bump: ctx.bumps.call,
+        });
+        emit_cpi!(OrderFilled {
+            order: order.key(),
+            kind: OptionKind::Call,
+            option: call,
+            id,
+            writer: ctx.accounts.writer.key(),
+            holder: order.buyer,
+            premium: paid,
+            deposited: order.lot,
+            locked,
+            slot: clock.slot,
+            gate_until
+        });
+        Ok(())
+    }
+
+    pub fn fill_put_order(
+        ctx: Context<FillPutOrder>,
+        id: u64,
+        lot: u64,
+        strike: u64,
+        premium: u64,
+        expiry_ts: i64,
+    ) -> Result<()> {
+        let clock = Clock::get()?;
+        let order = &ctx.accounts.order;
+        require!(
+            order.lot == lot && order.strike == strike && order.premium == premium && order.expiry_ts == expiry_ts,
+            OnceError::TermsMismatch
+        );
+        require!(clock.unix_timestamp < order.expiry_ts, OnceError::ExpiryNotFuture);
+        mint::validate_put_mint(&ctx.accounts.mint.to_account_info())?;
+        let config = &mut ctx.accounts.config;
+        let gate_until = clock
+            .slot
+            .checked_add(config.gate_slots)
+            .ok_or(OnceError::Overflow)?;
+        config.next_id = id.checked_add(1).ok_or(OnceError::Overflow)?;
+        // The premium reaches the writer first, so the writer needs only the strike less the premium.
+        let paid = pay_order(
+            order,
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.order_vault.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.usdc.to_account_info(),
+            ctx.accounts.buyer.to_account_info(),
+            ctx.accounts.order_vault.amount,
+            ctx.accounts.usdc_mint.decimals,
+        )?;
+        transfer(
+            ctx.accounts.usdc_token_program.key(),
+            ctx.accounts.usdc.to_account_info(),
+            ctx.accounts.usdc_mint.to_account_info(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.writer.to_account_info(),
+            order.strike,
+            ctx.accounts.usdc_mint.decimals,
+            &[],
+        )?;
+        ctx.accounts.vault.reload()?;
+        require_eq!(ctx.accounts.vault.amount, order.strike, OnceError::DepositMismatch);
+        let locked = lock_order_once(
+            order,
+            ctx.accounts.once_token_program.key(),
+            &mut ctx.accounts.order_once,
+            ctx.accounts.once_mint.to_account_info(),
+            ctx.accounts.once_mint.decimals,
+            &mut ctx.accounts.option_lock_vault,
+            ctx.accounts.buyer.to_account_info(),
+        )?;
+        let put = ctx.accounts.put.key();
+        ctx.accounts.option_lock.set_inner(Lock {
+            locker: order.buyer,
+            call: put,
+            amount: locked,
+            release_slot: gate_until,
+            bump: ctx.bumps.option_lock,
+        });
+        ctx.accounts.put.set_inner(Put {
+            id,
+            writer: ctx.accounts.writer.key(),
+            mint: order.mint,
+            token_program: order.token_program,
+            lot: order.lot,
+            strike: order.strike,
+            premium: order.premium,
+            expiry_ts: order.expiry_ts,
+            written_slot: clock.slot,
+            gate_until,
+            state: CallState::Held,
+            holder: Some(order.buyer),
+            bought_slot: clock.slot,
+            settled_slot: 0,
+            bump: ctx.bumps.put,
+        });
+        emit_cpi!(OrderFilled {
+            order: order.key(),
+            kind: OptionKind::Put,
+            option: put,
+            id,
+            writer: ctx.accounts.writer.key(),
+            holder: order.buyer,
+            premium: paid,
+            deposited: order.strike,
+            locked,
+            slot: clock.slot,
+            gate_until
+        });
+        Ok(())
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1065,4 +1377,62 @@ fn settle_put<'info>(
         &[seeds],
     )?;
     close(program, vault, writer, put.to_account_info(), &[seeds])
+}
+
+/// The whole order vault goes to the writer and the vault closes, its rent to the buyer.
+#[allow(clippy::too_many_arguments)]
+fn pay_order<'info>(
+    order: &Account<'info, Order>,
+    program: Pubkey,
+    vault: AccountInfo<'info>,
+    mint: AccountInfo<'info>,
+    destination: AccountInfo<'info>,
+    buyer: AccountInfo<'info>,
+    amount: u64,
+    decimals: u8,
+) -> Result<u64> {
+    let nonce = order.nonce.to_le_bytes();
+    let seeds: &[&[u8]] = &[b"order", order.buyer.as_ref(), &nonce, &[order.bump]];
+    transfer(
+        program,
+        vault.clone(),
+        mint,
+        destination,
+        order.to_account_info(),
+        amount,
+        decimals,
+        &[seeds],
+    )?;
+    close(program, vault, buyer, order.to_account_info(), &[seeds])?;
+    Ok(amount)
+}
+
+/// The order's whole ONCE moves into the option's Lock and the order's ONCE account closes, its rent to the buyer.
+#[allow(clippy::too_many_arguments)]
+fn lock_order_once<'info>(
+    order: &Account<'info, Order>,
+    program: Pubkey,
+    order_once: &mut InterfaceAccount<'info, token_interface::TokenAccount>,
+    mint: AccountInfo<'info>,
+    decimals: u8,
+    lock_vault: &mut InterfaceAccount<'info, token_interface::TokenAccount>,
+    buyer: AccountInfo<'info>,
+) -> Result<u64> {
+    let nonce = order.nonce.to_le_bytes();
+    let seeds: &[&[u8]] = &[b"order", order.buyer.as_ref(), &nonce, &[order.bump]];
+    let amount = order_once.amount;
+    transfer(
+        program,
+        order_once.to_account_info(),
+        mint,
+        lock_vault.to_account_info(),
+        order.to_account_info(),
+        amount,
+        decimals,
+        &[seeds],
+    )?;
+    lock_vault.reload()?;
+    require_eq!(lock_vault.amount, amount, OnceError::DepositMismatch);
+    close(program, order_once.to_account_info(), buyer, order.to_account_info(), &[seeds])?;
+    Ok(amount)
 }

@@ -15,9 +15,10 @@ import { getCreateAccountInstruction } from '@solana-program/system';
 import * as once from '../client/src/generated/index.js';
 import { TOKEN, TOKEN_2022, ATA_PROGRAM, LOADER, USDC, XSTOCKS } from '../client/constants.js';
 import { decodeEvents } from '../client/events.js';
-import { findConfigPda, findCallPda, findVaultPda, findLockPda, findLockVaultPda, findListingPda, findResaleLockPda, findResaleLockVaultPda } from '../client/pdas.js';
+import { findConfigPda, findCallPda, findVaultPda, findLockPda, findLockVaultPda, findListingPda, findResaleLockPda, findResaleLockVaultPda, findOrderPda, findOrderVaultPda, findOrderOncePda } from '../client/pdas.js';
 
 export const PROGRAM = once.ONCE_PROGRAM_ADDRESS;
+const getU64Bytes = (n: bigint) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, n, true); return b; };
 export const LOT = 1_000_000n, STRIKE = 2_000_000n, PREMIUM = 100_000n;
 export const dedicatedMeasurements: Record<string, { label: string; cu: string; events: unknown[] }[]> = {};
 export const measurements: Record<string, string[]> = {};
@@ -248,6 +249,44 @@ export class Harness {
             price: listing.price, slot: call.boughtSlot, locked: ixs.some(ix => ix.programAddress === PROGRAM && once.LOCK_AND_BUY_LISTED_DISCRIMINATOR.every((v,i) => ix.data?.[i] === v)) ? this.configState().lockAmount : 0n });
           expect(old.holder).toEqual({ __option: 'Some', value: listing.seller });
           expect(this.svm.getAccount(at).exists).toBe(false);
+        } else if ('order' in event.data) {
+          const d = event.data as any, slot = this.svm.getClock().slot;
+          const vaultAt = (await findOrderVaultPda(d.order))[0], onceAt = (await findOrderOncePda(d.order))[0];
+          const held = (a: Address) => { const x = priorByKey.get(a); return x?.exists && x.data.length >= 72 ? Buffer.from(x.data).readBigUInt64LE(64) : 0n; };
+          if (event.name === 'OrderPlaced') {
+            const o = once.getOrderDecoder().decode(accountData(this.svm, d.order));
+            expect(d).toEqual({ order: d.order, buyer: o.buyer, nonce: o.nonce, kind: o.kind, mint: o.mint, lot: o.lot, strike: o.strike,
+              premium: o.premium, expiryTs: o.expiryTs, locked: this.configState().lockAmount, slot: o.placedSlot });
+            expect(o.placedSlot).toBe(slot);
+            expect(d.order).toBe((await findOrderPda(o.buyer, o.nonce))[0]);
+            expect(amount(this.svm, vaultAt)).toBe(o.premium);
+            expect(amount(this.svm, onceAt)).toBe(d.locked);
+          } else {
+            const prior = priorByKey.get(d.order);
+            if (!prior?.exists) throw new Error('Missing pre-order account');
+            const o = once.getOrderDecoder().decode(prior.data);
+            for (const gone of [d.order, vaultAt, onceAt]) expect(this.svm.getAccount(gone).exists).toBe(false);
+            if (event.name === 'OrderCancelled') {
+              expect(d).toEqual({ order: d.order, buyer: o.buyer, premium: held(vaultAt), unlocked: held(onceAt), slot });
+            } else {
+              const call = o.kind === once.OptionKind.Call;
+              const priorConfig = priorByKey.get(this.config);
+              if (!priorConfig?.exists) throw new Error('Missing pre-fill config');
+              expect(once.getConfigDecoder().decode(priorConfig.data).nextId).toBe(d.id);
+              expect(this.configState().nextId).toBe(d.id + 1n);
+              expect(d.option).toBe((await getProgramDerivedAddress({ programAddress: PROGRAM, seeds: [call ? 'call' : 'put', getU64Bytes(d.id)] }))[0]);
+              const opt = (call ? once.getCallAccountDecoder() : once.getPutDecoder()).decode(accountData(this.svm, d.option));
+              expect(opt).toMatchObject({ id: d.id, writer: d.writer, mint: o.mint, tokenProgram: o.tokenProgram, lot: o.lot, strike: o.strike, premium: o.premium,
+                expiryTs: o.expiryTs, writtenSlot: slot, gateUntil: slot + this.configState().gateSlots, state: once.CallState.Held,
+                holder: { __option: 'Some', value: o.buyer }, boughtSlot: slot, settledSlot: 0n });
+              expect(d).toEqual({ order: d.order, kind: o.kind, option: d.option, id: d.id, writer: opt.writer, holder: o.buyer, premium: held(vaultAt),
+                deposited: call ? o.lot : o.strike, locked: held(onceAt), slot, gateUntil: opt.gateUntil });
+              expect(once.getLockDecoder().decode(accountData(this.svm, (await findLockPda(d.option))[0]))).toMatchObject({ locker: o.buyer, call: d.option, amount: d.locked, releaseSlot: opt.gateUntil });
+              expect(amount(this.svm, (await findLockVaultPda(d.option))[0])).toBe(d.locked);
+              const optionVault = (await getProgramDerivedAddress({ programAddress: PROGRAM, seeds: [call ? 'vault' : 'put_vault', getAddressEncoder().encode(d.option)] }))[0];
+              expect(amount(this.svm, optionVault)).toBe(d.deposited);
+            }
+          }
         } else if ('put' in event.data) {
           const d = event.data as any, put = once.getPutDecoder().decode(accountData(this.svm, d.put));
           const vaultAddress = (await getProgramDerivedAddress({ programAddress: PROGRAM, seeds: ['put_vault', getAddressEncoder().encode(d.put)] }))[0];

@@ -38,6 +38,7 @@ import {
   getConfigCodec,
   getListingCodec,
   getLockCodec,
+  getOrderCodec,
   getPutCodec,
   getResaleLockCodec,
   type CallAccount,
@@ -48,6 +49,8 @@ import {
   type ListingArgs,
   type Lock,
   type LockArgs,
+  type Order,
+  type OrderArgs,
   type Put,
   type PutArgs,
   type ResaleLock,
@@ -60,10 +63,13 @@ import {
   getBuyPutInstructionAsync,
   getCallInstructionAsync,
   getCancelInstructionAsync,
+  getCancelOrderInstructionAsync,
   getCancelPutInstructionAsync,
   getCloseOutInstructionAsync,
   getCloseOutPutInstructionAsync,
   getExercisePutInstructionAsync,
+  getFillOrderInstructionAsync,
+  getFillPutOrderInstructionAsync,
   getInitInstructionAsync,
   getListInstructionAsync,
   getListPutInstructionAsync,
@@ -71,6 +77,7 @@ import {
   getLockAndBuyListedInstructionAsync,
   getLockAndBuyListedPutInstructionAsync,
   getLockAndBuyPutInstructionAsync,
+  getPlaceOrderInstructionAsync,
   getReclaimInstructionAsync,
   getReclaimPutInstructionAsync,
   getReturnLockInstructionAsync,
@@ -86,10 +93,13 @@ import {
   parseBuyPutInstruction,
   parseCallInstruction,
   parseCancelInstruction,
+  parseCancelOrderInstruction,
   parseCancelPutInstruction,
   parseCloseOutInstruction,
   parseCloseOutPutInstruction,
   parseExercisePutInstruction,
+  parseFillOrderInstruction,
+  parseFillPutOrderInstruction,
   parseInitInstruction,
   parseListInstruction,
   parseListPutInstruction,
@@ -97,6 +107,7 @@ import {
   parseLockAndBuyListedInstruction,
   parseLockAndBuyListedPutInstruction,
   parseLockAndBuyPutInstruction,
+  parsePlaceOrderInstruction,
   parseReclaimInstruction,
   parseReclaimPutInstruction,
   parseReturnLockInstruction,
@@ -112,10 +123,13 @@ import {
   type BuyPutAsyncInput,
   type CallAsyncInput,
   type CancelAsyncInput,
+  type CancelOrderAsyncInput,
   type CancelPutAsyncInput,
   type CloseOutAsyncInput,
   type CloseOutPutAsyncInput,
   type ExercisePutAsyncInput,
+  type FillOrderAsyncInput,
+  type FillPutOrderAsyncInput,
   type InitAsyncInput,
   type ListAsyncInput,
   type ListPutAsyncInput,
@@ -129,10 +143,13 @@ import {
   type ParsedBuyPutInstruction,
   type ParsedCallInstruction,
   type ParsedCancelInstruction,
+  type ParsedCancelOrderInstruction,
   type ParsedCancelPutInstruction,
   type ParsedCloseOutInstruction,
   type ParsedCloseOutPutInstruction,
   type ParsedExercisePutInstruction,
+  type ParsedFillOrderInstruction,
+  type ParsedFillPutOrderInstruction,
   type ParsedInitInstruction,
   type ParsedListInstruction,
   type ParsedListPutInstruction,
@@ -140,6 +157,7 @@ import {
   type ParsedLockAndBuyListedInstruction,
   type ParsedLockAndBuyListedPutInstruction,
   type ParsedLockAndBuyPutInstruction,
+  type ParsedPlaceOrderInstruction,
   type ParsedReclaimInstruction,
   type ParsedReclaimPutInstruction,
   type ParsedReturnLockInstruction,
@@ -149,6 +167,7 @@ import {
   type ParsedUnlistInstruction,
   type ParsedWriteInstruction,
   type ParsedWritePutInstruction,
+  type PlaceOrderAsyncInput,
   type ReclaimAsyncInput,
   type ReclaimPutAsyncInput,
   type ReturnLockAsyncInput,
@@ -164,11 +183,18 @@ import {
   findBuyPutVaultPda,
   findCallAccountPda,
   findConfigPda,
+  findFillPutOrderOptionLockPda,
+  findFillPutOrderOptionLockVaultPda,
   findListingPda,
   findLockAndBuyListedPutLockPda,
   findLockAndBuyListedPutLockVaultPda,
   findLockPda,
   findLockVaultPda,
+  findOptionLockPda,
+  findOptionLockVaultPda,
+  findOrderOncePda,
+  findOrderPda,
+  findOrderVaultPda,
   findPutPda,
   findVaultPda,
 } from "../pdas/index.js";
@@ -181,6 +207,7 @@ export enum OnceAccount {
   Config,
   Listing,
   Lock,
+  Order,
   Put,
   ResaleLock,
 }
@@ -237,6 +264,17 @@ export function identifyOnceAccount(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([134, 173, 223, 185, 77, 86, 28, 51]),
+      ),
+      0,
+    )
+  ) {
+    return OnceAccount.Order;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([79, 252, 228, 224, 131, 248, 80, 146]),
       ),
       0,
@@ -270,6 +308,9 @@ export enum OnceEvent {
   Listed,
   LockReturned,
   OnceSet,
+  OrderCancelled,
+  OrderFilled,
+  OrderPlaced,
   ParamsSet,
   PutBought,
   PutCancelled,
@@ -377,6 +418,39 @@ export function identifyOnceEvent(
     )
   ) {
     return OnceEvent.OnceSet;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([108, 56, 128, 68, 168, 113, 168, 239]),
+      ),
+      0,
+    )
+  ) {
+    return OnceEvent.OrderCancelled;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([120, 124, 109, 66, 249, 116, 174, 30]),
+      ),
+      0,
+    )
+  ) {
+    return OnceEvent.OrderFilled;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([96, 130, 204, 234, 169, 219, 216, 227]),
+      ),
+      0,
+    )
+  ) {
+    return OnceEvent.OrderPlaced;
   }
   if (
     containsBytes(
@@ -544,10 +618,13 @@ export enum OnceInstruction {
   BuyPut,
   Call,
   Cancel,
+  CancelOrder,
   CancelPut,
   CloseOut,
   CloseOutPut,
   ExercisePut,
+  FillOrder,
+  FillPutOrder,
   Init,
   List,
   ListPut,
@@ -555,6 +632,7 @@ export enum OnceInstruction {
   LockAndBuyListed,
   LockAndBuyListedPut,
   LockAndBuyPut,
+  PlaceOrder,
   Reclaim,
   ReclaimPut,
   ReturnLock,
@@ -640,6 +718,17 @@ export function identifyOnceInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([95, 129, 237, 240, 8, 49, 223, 132]),
+      ),
+      0,
+    )
+  ) {
+    return OnceInstruction.CancelOrder;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([203, 156, 21, 218, 179, 88, 184, 129]),
       ),
       0,
@@ -679,6 +768,28 @@ export function identifyOnceInstruction(
     )
   ) {
     return OnceInstruction.ExercisePut;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([232, 122, 115, 25, 199, 143, 136, 162]),
+      ),
+      0,
+    )
+  ) {
+    return OnceInstruction.FillOrder;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([90, 222, 84, 209, 186, 187, 26, 64]),
+      ),
+      0,
+    )
+  ) {
+    return OnceInstruction.FillPutOrder;
   }
   if (
     containsBytes(
@@ -756,6 +867,17 @@ export function identifyOnceInstruction(
     )
   ) {
     return OnceInstruction.LockAndBuyPut;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([51, 194, 155, 175, 109, 130, 96, 106]),
+      ),
+      0,
+    )
+  ) {
+    return OnceInstruction.PlaceOrder;
   }
   if (
     containsBytes(
@@ -882,6 +1004,9 @@ export type ParsedOnceInstruction<
       instructionType: OnceInstruction.Cancel;
     } & ParsedCancelInstruction<TProgram>)
   | ({
+      instructionType: OnceInstruction.CancelOrder;
+    } & ParsedCancelOrderInstruction<TProgram>)
+  | ({
       instructionType: OnceInstruction.CancelPut;
     } & ParsedCancelPutInstruction<TProgram>)
   | ({
@@ -893,6 +1018,12 @@ export type ParsedOnceInstruction<
   | ({
       instructionType: OnceInstruction.ExercisePut;
     } & ParsedExercisePutInstruction<TProgram>)
+  | ({
+      instructionType: OnceInstruction.FillOrder;
+    } & ParsedFillOrderInstruction<TProgram>)
+  | ({
+      instructionType: OnceInstruction.FillPutOrder;
+    } & ParsedFillPutOrderInstruction<TProgram>)
   | ({
       instructionType: OnceInstruction.Init;
     } & ParsedInitInstruction<TProgram>)
@@ -914,6 +1045,9 @@ export type ParsedOnceInstruction<
   | ({
       instructionType: OnceInstruction.LockAndBuyPut;
     } & ParsedLockAndBuyPutInstruction<TProgram>)
+  | ({
+      instructionType: OnceInstruction.PlaceOrder;
+    } & ParsedPlaceOrderInstruction<TProgram>)
   | ({
       instructionType: OnceInstruction.Reclaim;
     } & ParsedReclaimInstruction<TProgram>)
@@ -989,6 +1123,13 @@ export function parseOnceInstruction<TProgram extends string>(
         ...parseCancelInstruction(instruction),
       };
     }
+    case OnceInstruction.CancelOrder: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OnceInstruction.CancelOrder,
+        ...parseCancelOrderInstruction(instruction),
+      };
+    }
     case OnceInstruction.CancelPut: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -1015,6 +1156,20 @@ export function parseOnceInstruction<TProgram extends string>(
       return {
         instructionType: OnceInstruction.ExercisePut,
         ...parseExercisePutInstruction(instruction),
+      };
+    }
+    case OnceInstruction.FillOrder: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OnceInstruction.FillOrder,
+        ...parseFillOrderInstruction(instruction),
+      };
+    }
+    case OnceInstruction.FillPutOrder: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OnceInstruction.FillPutOrder,
+        ...parseFillPutOrderInstruction(instruction),
       };
     }
     case OnceInstruction.Init: {
@@ -1064,6 +1219,13 @@ export function parseOnceInstruction<TProgram extends string>(
       return {
         instructionType: OnceInstruction.LockAndBuyPut,
         ...parseLockAndBuyPutInstruction(instruction),
+      };
+    }
+    case OnceInstruction.PlaceOrder: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OnceInstruction.PlaceOrder,
+        ...parsePlaceOrderInstruction(instruction),
       };
     }
     case OnceInstruction.Reclaim: {
@@ -1154,6 +1316,8 @@ export type OncePluginAccounts = {
   listing: ReturnType<typeof getListingCodec> &
     SelfFetchFunctions<ListingArgs, Listing>;
   lock: ReturnType<typeof getLockCodec> & SelfFetchFunctions<LockArgs, Lock>;
+  order: ReturnType<typeof getOrderCodec> &
+    SelfFetchFunctions<OrderArgs, Order>;
   put: ReturnType<typeof getPutCodec> & SelfFetchFunctions<PutArgs, Put>;
   resaleLock: ReturnType<typeof getResaleLockCodec> &
     SelfFetchFunctions<ResaleLockArgs, ResaleLock>;
@@ -1180,6 +1344,10 @@ export type OncePluginInstructions = {
   cancel: (
     input: CancelAsyncInput,
   ) => ReturnType<typeof getCancelInstructionAsync> & SelfPlanAndSendFunctions;
+  cancelOrder: (
+    input: CancelOrderAsyncInput,
+  ) => ReturnType<typeof getCancelOrderInstructionAsync> &
+    SelfPlanAndSendFunctions;
   cancelPut: (
     input: CancelPutAsyncInput,
   ) => ReturnType<typeof getCancelPutInstructionAsync> &
@@ -1195,6 +1363,14 @@ export type OncePluginInstructions = {
   exercisePut: (
     input: ExercisePutAsyncInput,
   ) => ReturnType<typeof getExercisePutInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  fillOrder: (
+    input: FillOrderAsyncInput,
+  ) => ReturnType<typeof getFillOrderInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  fillPutOrder: (
+    input: FillPutOrderAsyncInput,
+  ) => ReturnType<typeof getFillPutOrderInstructionAsync> &
     SelfPlanAndSendFunctions;
   init: (
     input: InitAsyncInput,
@@ -1220,6 +1396,10 @@ export type OncePluginInstructions = {
   lockAndBuyPut: (
     input: LockAndBuyPutAsyncInput,
   ) => ReturnType<typeof getLockAndBuyPutInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  placeOrder: (
+    input: PlaceOrderAsyncInput,
+  ) => ReturnType<typeof getPlaceOrderInstructionAsync> &
     SelfPlanAndSendFunctions;
   reclaim: (
     input: ReclaimAsyncInput,
@@ -1261,12 +1441,19 @@ export type OncePluginPdas = {
   listing: typeof findListingPda;
   buyListedPutListing: typeof findBuyListedPutListingPda;
   buyPutVault: typeof findBuyPutVaultPda;
+  orderVault: typeof findOrderVaultPda;
+  orderOnce: typeof findOrderOncePda;
+  callAccount: typeof findCallAccountPda;
+  optionLock: typeof findOptionLockPda;
+  optionLockVault: typeof findOptionLockVaultPda;
+  put: typeof findPutPda;
+  fillPutOrderOptionLock: typeof findFillPutOrderOptionLockPda;
+  fillPutOrderOptionLockVault: typeof findFillPutOrderOptionLockVaultPda;
   lock: typeof findLockPda;
   lockVault: typeof findLockVaultPda;
   lockAndBuyListedPutLock: typeof findLockAndBuyListedPutLockPda;
   lockAndBuyListedPutLockVault: typeof findLockAndBuyListedPutLockVaultPda;
-  callAccount: typeof findCallAccountPda;
-  put: typeof findPutPda;
+  order: typeof findOrderPda;
 };
 
 export type OncePluginRequirements = ClientWithRpc<
@@ -1286,6 +1473,7 @@ export function onceProgram() {
           config: addSelfFetchFunctions(client, getConfigCodec()),
           listing: addSelfFetchFunctions(client, getListingCodec()),
           lock: addSelfFetchFunctions(client, getLockCodec()),
+          order: addSelfFetchFunctions(client, getOrderCodec()),
           put: addSelfFetchFunctions(client, getPutCodec()),
           resaleLock: addSelfFetchFunctions(client, getResaleLockCodec()),
         },
@@ -1314,6 +1502,11 @@ export function onceProgram() {
               client,
               getCancelInstructionAsync(input),
             ),
+          cancelOrder: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getCancelOrderInstructionAsync(input),
+            ),
           cancelPut: (input) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -1333,6 +1526,16 @@ export function onceProgram() {
             addSelfPlanAndSendFunctions(
               client,
               getExercisePutInstructionAsync(input),
+            ),
+          fillOrder: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getFillOrderInstructionAsync(input),
+            ),
+          fillPutOrder: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getFillPutOrderInstructionAsync(input),
             ),
           init: (input) =>
             addSelfPlanAndSendFunctions(client, getInitInstructionAsync(input)),
@@ -1362,6 +1565,11 @@ export function onceProgram() {
             addSelfPlanAndSendFunctions(
               client,
               getLockAndBuyPutInstructionAsync(input),
+            ),
+          placeOrder: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getPlaceOrderInstructionAsync(input),
             ),
           reclaim: (input) =>
             addSelfPlanAndSendFunctions(
@@ -1412,12 +1620,19 @@ export function onceProgram() {
           listing: findListingPda,
           buyListedPutListing: findBuyListedPutListingPda,
           buyPutVault: findBuyPutVaultPda,
+          orderVault: findOrderVaultPda,
+          orderOnce: findOrderOncePda,
+          callAccount: findCallAccountPda,
+          optionLock: findOptionLockPda,
+          optionLockVault: findOptionLockVaultPda,
+          put: findPutPda,
+          fillPutOrderOptionLock: findFillPutOrderOptionLockPda,
+          fillPutOrderOptionLockVault: findFillPutOrderOptionLockVaultPda,
           lock: findLockPda,
           lockVault: findLockVaultPda,
           lockAndBuyListedPutLock: findLockAndBuyListedPutLockPda,
           lockAndBuyListedPutLockVault: findLockAndBuyListedPutLockVaultPda,
-          callAccount: findCallAccountPda,
-          put: findPutPda,
+          order: findOrderPda,
         },
         identifyAccount: identifyOnceAccount,
         identifyInstruction: identifyOnceInstruction,

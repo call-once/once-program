@@ -7,3 +7,4 @@
  */
 
 export * from "./callState.js";
+export * from "./optionKind.js";

@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use crate::state::OptionKind;
 
 #[event]
 pub struct Initialized {
@@ -195,4 +196,43 @@ pub struct PutClosedOut {
     pub writer: Pubkey,
     pub returned: u64,
     pub slot: u64,
+}
+
+#[event]
+pub struct OrderPlaced {
+    pub order: Pubkey,
+    pub buyer: Pubkey,
+    pub nonce: u64,
+    pub kind: OptionKind,
+    pub mint: Pubkey,
+    pub lot: u64,
+    pub strike: u64,
+    pub premium: u64,
+    pub expiry_ts: i64,
+    pub locked: u64,
+    pub slot: u64,
+}
+
+#[event]
+pub struct OrderCancelled {
+    pub order: Pubkey,
+    pub buyer: Pubkey,
+    pub premium: u64,
+    pub unlocked: u64,
+    pub slot: u64,
+}
+
+#[event]
+pub struct OrderFilled {
+    pub order: Pubkey,
+    pub kind: OptionKind,
+    pub option: Pubkey,
+    pub id: u64,
+    pub writer: Pubkey,
+    pub holder: Pubkey,
+    pub premium: u64,
+    pub deposited: u64,
+    pub locked: u64,
+    pub slot: u64,
+    pub gate_until: u64,
 }

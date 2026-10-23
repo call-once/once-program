@@ -22,3 +22,6 @@ export const findResaleLockVaultPda = (call: Address, locker: Address) => getPro
 
 export const findPutPda = (id: bigint, programAddress = ONCE_PROGRAM_ADDRESS) => getProgramDerivedAddress({ programAddress, seeds: ["put", getU64Encoder().encode(id)] });
 export const findPutVaultPda = (put: Address, programAddress = ONCE_PROGRAM_ADDRESS) => getProgramDerivedAddress({ programAddress, seeds: ["put_vault", getAddressEncoder().encode(put)] });
+export const findOrderPda = (buyer: Address, nonce: bigint, programAddress = ONCE_PROGRAM_ADDRESS) => getProgramDerivedAddress({ programAddress, seeds: ["order", getAddressEncoder().encode(buyer), getU64Encoder().encode(nonce)] });
+export const findOrderVaultPda = (order: Address, programAddress = ONCE_PROGRAM_ADDRESS) => getProgramDerivedAddress({ programAddress, seeds: ["order_vault", getAddressEncoder().encode(order)] });
+export const findOrderOncePda = (order: Address, programAddress = ONCE_PROGRAM_ADDRESS) => getProgramDerivedAddress({ programAddress, seeds: ["order_once", getAddressEncoder().encode(order)] });

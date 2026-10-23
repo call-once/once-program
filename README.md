@@ -6,7 +6,7 @@ A Solana program in which a call option holds the tokenized stock it promises. T
 
 Program `GRzKU9i3Cs7A5Euf9gGZjbRnpypw7DzaU3hWRfUgpYTa` on Solana mainnet.
 
-callonce.xyz is the specification: it draws the device and states eleven claims. This repository is the device. Each claim below names the code that holds it and the test that checks it, and the program on mainnet is the deterministic build of this code. A claim can be checked here instead of taken from the page.
+callonce.xyz is the specification: it draws the device and states twelve claims. This repository is the device. Each claim below names the code that holds it and the test that checks it, and the program on mainnet is the deterministic build of this code. A claim can be checked here instead of taken from the page.
 
 ## Claims
 
@@ -76,6 +76,12 @@ Held by `buy_listed` or `buy_listed_put` followed by `close_out` or `close_out_p
 
 Checked by `call: buy_listed + close_out; stock to the writer, price to the holder, vault and listing closed, Cancelled with the writer as holder`, `put: buy_listed_put + close_out_put; the writer nets strike − price in USDC`, `put: a writer holding less USDC than the price cannot buy back, though the vault holds the strike`, and `inside the gate the writer buys back only by locking ONCE, for a call and for a put; its lock returns after the gate` in `tests/exit.test.ts`.
 
+**12. The call of claim 1 or the put of claim 8, ordered by the wallet that will hold it, which puts up the premium and locks ONCE first; a writer who takes the order fills its vault and receives the premium, and that wallet holds it, in the same transaction; the ONCE returns whole once the slots of claim 5 end.**
+
+Held by `place_order`, `cancel_order`, `fill_order` and `fill_put_order` and their accounts in `contexts.rs`. `place_order` moves the premium and `lock_amount` ONCE into token accounts owned by an `Order` at `["order", buyer, nonce]` and takes no option id. `cancel_order`, signed by the buyer, returns both whole and closes the three accounts. `fill_order` and `fill_put_order` take `Config.next_id` as `write` does, refuse terms other than the order's (`TermsMismatch`), fill the new option's vault, pay the whole premium to the writer, create the option `Held` by the buyer, and move the order's ONCE into the option's `Lock` with its release at the end of the option's gate, from which `return_lock` returns it.
+
+Checked by `placing locks the ONCE and puts the premium up and takes no id; a writer fills it with the next id, the call is the buyer's in that transaction, and the ONCE returns whole after the call's gate`, `the writer needs only the strike less the premium; one raw less and nothing moves; the put is the buyer's and puts once`, `the premium, the ONCE placed and every rent come back; no id was used; nothing fills it afterwards`, `needs ONCE set, positive terms, a future expiry, a mint the option takes, and the ONCE and the premium; it takes no id`, `takes the kind ordered, the next id, the terms the writer names, before expiry, the order's mint, with the rent to the order's buyer and the premium to the writer; a second fill fails`, `a donation to the order's accounts goes with them: USDC to the writer on fill and to the buyer on cancel, ONCE into the lock and back; lamports sent to the lock address block nothing`, `lives as any other: offered inside its gate only to a wallet that locks, bought back by its writer with the stock taken out; a put reclaimed after expiry` in `tests/order.test.ts`, `place, fill with the writer's accounts created in the same transaction, and cancel fit (ONCE on Token)` and `place, fill with the writer's accounts created in the same transaction, and cancel fit (ONCE on Token-2022)` cover both ONCE programs.
+
 ## Parts
 
 The numbers are the reference numerals in the drawings on callonce.xyz.
@@ -87,8 +93,8 @@ The numbers are the reference numerals in the drawings on callonce.xyz.
 | (16) | strike | `Call.strike`, a total in raw USDC units for the whole lot; in a put, the strike sits in its vault, a USDC token account at `["put_vault", put]` owned by the put |
 | (18) | pin | `Call.state`: `Open` or `Held` while the stock is inside, `Exercised`, `Reclaimed` or `Cancelled` once it has left. No instruction sets it back; a writer that buys its option back and closes it out leaves it `Cancelled`, with itself as holder |
 | (24) | gate | `Call.gate_until`, or `Config.gate_floor` for a call written before ONCE was set |
-| (28) | lock | `Lock` account at `["lock", call]` and its token account at `["lock_vault", call]`; a purchase from a holder inside the gate locks into a `ResaleLock` at `["resale_lock", call, buyer]` and its token account at `["resale_lock_vault", call, buyer]`, one per wallet and call, adding `lock_amount` on each such purchase; a put's lock is a `Lock` at `["lock", put]`, whose `call` field holds the put; a purchase of a put from its holder inside the gate locks the same way at `["resale_lock", put, buyer]` |
-| (30) | holder's mark | `Call.holder`; a price the holder names sits in a `Listing` account at `["listing", call]`, or `["listing", put]` for a put |
+| (28) | lock | `Lock` account at `["lock", call]` and its token account at `["lock_vault", call]`; a purchase from a holder inside the gate locks into a `ResaleLock` at `["resale_lock", call, buyer]` and its token account at `["resale_lock_vault", call, buyer]`, one per wallet and call, adding `lock_amount` on each such purchase; a put's lock is a `Lock` at `["lock", put]`, whose `call` field holds the put; a purchase of a put from its holder inside the gate locks the same way at `["resale_lock", put, buyer]`; an order holds its ONCE in a token account at `["order_once", order]` until a writer takes it, and the fill moves it into the option's `Lock` |
+| (30) | holder's mark | `Call.holder`; a price the holder names sits in a `Listing` account at `["listing", call]`, or `["listing", put]` for a put; an order names its holder before the option exists, as `Order.buyer` at `["order", buyer, nonce]`, with its premium at `["order_vault", order]` |
 | (32) | ONCE | the mint in `Config.once_mint`; the config account is at `["config"]` |
 
 ## Instructions
@@ -118,6 +124,10 @@ The numbers are the reference numerals in the drawings on callonce.xyz.
 | `lock_and_buy_listed_put` | buyer | held, before expiry, gate shut, signed price matches | Adds a fresh `lock_amount` to the buyer's resale lock, then buys as above |
 | `close_out` | writer | held by its writer | Returns the whole stock vault and its rent to the writer; leaves the call `Cancelled`, holder=writer |
 | `close_out_put` | writer | held by its writer | Returns the whole USDC vault and its rent to the writer; leaves the put `Cancelled`, holder=writer |
+| `place_order` | buyer | ONCE set, lot, strike and premium above zero, expiry in the future, the mint passes the check for its kind | Moves the premium into the order's USDC account and `lock_amount` ONCE into its ONCE account; takes no option id |
+| `cancel_order` | buyer | the order stands, also after its expiry | Returns the whole premium and ONCE to the buyer; the order and its accounts close |
+| `fill_order` | writer | a call order, before its expiry, `id` is `Config.next_id`, the named terms are the order's | Moves the lot into a new call's vault and pays the whole premium to the writer; the call is `Held` by the buyer; the order's ONCE moves into the call's `Lock`, released at the end of its gate |
+| `fill_put_order` | writer | a put order, as above | Pays the whole premium to the writer, then moves the strike from the writer into a new put's vault; the put is `Held` by the buyer; the ONCE as above |
 | `init`, `set_once`, `set_params` | upgrade authority, admin | | Configuration. None of them can move the stock in a vault or the ONCE in a lock |
 
 Expiry is checked against the chain clock (`Clock::unix_timestamp`). The gate is counted in slots.

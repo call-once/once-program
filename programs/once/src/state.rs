@@ -108,3 +108,27 @@ pub struct Put {
     pub settled_slot: u64,
     pub bump: u8,
 }
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum OptionKind {
+    Call,
+    Put,
+}
+
+/// Terms a buyer asks for, at `["order", buyer, nonce]`, with the premium in `order_vault` and `lock_amount` ONCE in
+/// `order_once`. The option it makes takes its id from `Config::next_id` when a writer fills it.
+#[account]
+#[derive(InitSpace)]
+pub struct Order {
+    pub buyer: Pubkey,
+    pub nonce: u64,
+    pub kind: OptionKind,
+    pub mint: Pubkey,
+    pub token_program: Pubkey,
+    pub lot: u64,
+    pub strike: u64,
+    pub premium: u64,
+    pub expiry_ts: i64,
+    pub placed_slot: u64,
+    pub bump: u8,
+}
